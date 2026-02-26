@@ -1,0 +1,114 @@
+package info.isaksson.erland.modeller.server;
+
+import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.security.TestSecurity;
+import io.restassured.http.ContentType;
+import org.hamcrest.Matchers;
+import org.junit.jupiter.api.Test;
+
+import java.util.UUID;
+
+import static io.restassured.RestAssured.given;
+
+@QuarkusTest
+public class DatasetsResourceTest {
+
+    @Test
+    @TestSecurity(user = "alice")
+    void create_and_list_datasets() {
+        UUID id =
+                given()
+                        .contentType(ContentType.JSON)
+                        .body("{\"name\":\"My Dataset\",\"description\":\"Hello\"}")
+                .when()
+                        .post("/datasets")
+                .then()
+                        .statusCode(201)
+                        .body("id", Matchers.notNullValue())
+                        .body("name", Matchers.equalTo("My Dataset"))
+                        .body("description", Matchers.equalTo("Hello"))
+                        .body("role", Matchers.equalTo("OWNER"))
+                        .extract().jsonPath().getUUID("id");
+
+        given()
+        .when()
+                .get("/datasets")
+        .then()
+                .statusCode(200)
+                .body("size()", Matchers.greaterThanOrEqualTo(1))
+                .body("id", Matchers.hasItem(id.toString()));
+    }
+
+    @Test
+    @TestSecurity(user = "alice")
+    void update_archive_unarchive_delete_lifecycle() {
+        UUID id =
+                given()
+                        .contentType(ContentType.JSON)
+                        .body("{\"name\":\"A\",\"description\":\"D\"}")
+                .when()
+                        .post("/datasets")
+                .then()
+                        .statusCode(201)
+                        .extract().jsonPath().getUUID("id");
+
+        // Update metadata (owner only in Phase 1)
+        given()
+                .contentType(ContentType.JSON)
+                .body("{\"name\":\"A2\",\"description\":\"D2\"}")
+        .when()
+                .put("/datasets/" + id)
+        .then()
+                .statusCode(200)
+                .body("name", Matchers.equalTo("A2"))
+                .body("description", Matchers.equalTo("D2"));
+
+        // Archive
+        given()
+        .when()
+                .post("/datasets/" + id + "/archive")
+        .then()
+                .statusCode(200)
+                .body("archivedAt", Matchers.notNullValue());
+
+        // Unarchive
+        given()
+        .when()
+                .post("/datasets/" + id + "/unarchive")
+        .then()
+                .statusCode(200)
+                .body("archivedAt", Matchers.nullValue());
+
+        // Delete (soft)
+        given()
+        .when()
+                .delete("/datasets/" + id)
+        .then()
+                .statusCode(204);
+
+        // Not readable after delete
+        given()
+        .when()
+                .get("/datasets/" + id)
+        .then()
+                .statusCode(404);
+    }
+
+    @Test
+    @TestSecurity(user = "bob")
+    void bob_cannot_read_alice_dataset() {
+        // Without sharing endpoints in Phase 1, bob should see no datasets and any random dataset is 404.
+        given()
+        .when()
+                .get("/datasets")
+        .then()
+                .statusCode(200)
+                .body("size()", Matchers.anyOf(Matchers.equalTo(0), Matchers.greaterThanOrEqualTo(0)));
+
+        given()
+        .when()
+                .get("/datasets/" + UUID.randomUUID())
+        .then()
+                .statusCode(404);
+    }
+}

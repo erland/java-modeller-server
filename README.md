@@ -78,3 +78,12 @@ Build and run the server with **JDK 21** (recommended baseline for this project)
 
 Implemented the dataset-level role model (OWNER/EDITOR/VIEWER) and a reusable authorization service (`DatasetAuthorizationService`) that checks the current principal against dataset ACL entries.
 
+
+
+## Step 7 — Dataset management endpoints
+Implemented dataset CRUD + archive/delete under `/datasets`.
+
+Run tests:
+- `./mvnw test`
+
+In dev (with Docker) Quarkus Dev Services will start PostgreSQL automatically.

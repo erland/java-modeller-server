@@ -6,6 +6,7 @@ import info.isaksson.erland.modeller.server.persistence.entities.DatasetAclId;
 import io.quarkus.hibernate.orm.panache.PanacheRepositoryBase;
 import jakarta.enterprise.context.ApplicationScoped;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -28,4 +29,16 @@ public class DatasetAclRepository implements PanacheRepositoryBase<DatasetAclEnt
             return Optional.empty();
         }
     }
+
+
+public List<UUID> findDatasetIdsForUser(String userSub) {
+    if (userSub == null || userSub.isBlank()) {
+        return List.of();
+    }
+    return find("id.userSub", userSub).stream()
+            .map(e -> e.id != null ? e.id.datasetId : null)
+            .filter(java.util.Objects::nonNull)
+            .distinct()
+            .toList();
+}
 }
