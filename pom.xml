@@ -60,6 +60,14 @@
       <artifactId>quarkus-swagger-ui</artifactId>
     </dependency>
 
+
+
+<!-- PostgreSQL connectivity (Step 2) -->
+<dependency>
+  <groupId>io.quarkus</groupId>
+  <artifactId>quarkus-jdbc-postgresql</artifactId>
+</dependency>
+
     <!-- Testing -->
     <dependency>
       <groupId>io.quarkus</groupId>

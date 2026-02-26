@@ -21,3 +21,25 @@ This repository currently contains the Phase 1 / Step 1 Quarkus skeleton:
 ### Build & run
 - `./mvnw test` (or `mvn test`)
 - `./mvnw quarkus:dev`
+
+
+## Step 2 — PostgreSQL connectivity + dev services
+
+This project includes the PostgreSQL JDBC driver (`quarkus-jdbc-postgresql`).
+
+### Option A: Quarkus Dev Services (recommended for local dev)
+If you have Docker running, Quarkus can automatically start a PostgreSQL container in `dev` mode.
+Run:
+
+- `./mvnw quarkus:dev`
+
+### Option B: Local Postgres via docker-compose
+Start a local Postgres with:
+
+- `docker compose -f docker-compose.dev.yml up -d`
+
+If you want to explicitly point Quarkus to it, set (for example) in `application.properties`:
+
+- `%dev.quarkus.datasource.jdbc.url=jdbc:postgresql://localhost:5432/modeller`
+
+(Dev Services is used when no JDBC URL is set.)
