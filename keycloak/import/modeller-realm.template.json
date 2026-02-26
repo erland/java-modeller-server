@@ -1,0 +1,32 @@
+{
+  "realm": "modeller",
+  "enabled": true,
+  "displayName": "Modeller (Dev)",
+  "loginTheme": "keycloak",
+  "clients": [
+    {
+      "clientId": "modeller-dev-cli",
+      "enabled": true,
+      "publicClient": true,
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "protocol": "openid-connect"
+    },
+    {
+      "clientId": "pwa-modeller",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "protocol": "openid-connect",
+      "redirectUris": [
+        "__KC_PWA_REDIRECT_URI__"
+      ],
+      "webOrigins": [
+        "__KC_PWA_ORIGIN__"
+      ]
+    }
+  ]
+}

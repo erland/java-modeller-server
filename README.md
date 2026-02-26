@@ -12,6 +12,8 @@ This bundle is intended to be **self-contained** for starting development in a n
 ## Repo
 Intended GitHub repository: `java-modeller-server`
 
+
+
 ## Step 1 status (Quarkus skeleton)
 This repository currently contains the Phase 1 / Step 1 Quarkus skeleton:
 - REST endpoint: `GET /me` (stub; will be protected in Step 5)
@@ -123,3 +125,107 @@ Typical prod configuration is supplied via environment variables / external conf
 - `QUARKUS_OIDC_CLIENT_ID`
 
 See `src/main/resources/application.properties` for examples.
+
+## Keycloak (dev)
+
+This repo includes a reproducible dev Keycloak setup **without persistent storage**.
+Each `docker compose up` imports the `modeller` realm and provisions dev users from a local file.
+
+### 1) Create local, uncommitted secrets files
+
+```bash
+cp keycloak/keycloak.secrets.env.example keycloak/keycloak.secrets.env
+cp keycloak/dev-users.list.example keycloak/dev-users.list
+# Edit both files and set passwords
+```
+
+### 2) Start Keycloak
+
+```bash
+docker compose -f docker-compose.keycloak.dev.yml up
+> If you get `permission denied` for `/opt/keycloak/entrypoint.sh` on macOS, run:
+>
+> `chmod +x keycloak/entrypoint.sh`
+>
+
+```
+
+### 3) Verify realm
+
+Open:
+- `http://localhost:18080/realms/modeller/.well-known/openid-configuration`
+
+### Notes
+- `keycloak/keycloak.secrets.env` and `keycloak/dev-users.list` are **gitignored**.
+- Add more users by adding lines to `keycloak/dev-users.list` (comma-separated: username,password,email,first,last).
+
+
+## Keycloak dev (no persistence, reproducible)
+
+This repo includes a Keycloak dev setup that:
+- imports the `modeller` realm on each start (no persistent Keycloak volume)
+- provisions dev users from a local, **gitignored** file
+- configures a PKCE-ready client for the PWA (`pwa-modeller`) using URLs from a local, **gitignored** file
+
+### 1) Create local-only config files (not committed)
+```bash
+cp keycloak/keycloak.secrets.env.example keycloak/keycloak.secrets.env
+cp keycloak/keycloak.urls.env.example keycloak/keycloak.urls.env
+cp keycloak/dev-users.list.example keycloak/dev-users.list
+# edit the copied files to set passwords and (optionally) override dev URLs / users
+```
+
+### 2) Start Keycloak
+```bash
+docker compose -f docker-compose.keycloak.dev.yml up
+> If you get `permission denied` for `/opt/keycloak/entrypoint.sh` on macOS, run:
+>
+> `chmod +x keycloak/entrypoint.sh`
+>
+
+```
+
+### Notes
+- PWA dev defaults (from the example file) assume the modeller runs at:
+  - `http://localhost:5173/pwa-modeller/`
+- The PKCE client uses redirect URI wildcard:
+  - `${KC_PWA_REDIRECT_BASE}*`
+- If you change the PWA base path/port, update `keycloak/keycloak.urls.env` and restart Keycloak.
+
+## Local dev CORS (PWA calling the server)
+
+Browser calls from the PWA dev server (e.g. `http://localhost:5173`) require CORS to be enabled on the API.
+
+Create a local-only config file (gitignored):
+
+```bash
+mkdir -p config
+cp config/dev-local.properties.example config/dev-local.properties
+# edit config/dev-local.properties and set quarkus.http.cors.origins to your PWA origin(s)
+```
+
+Then start the server:
+
+```bash
+./mvnw quarkus:dev
+```
+
+Notes:
+- The server loads `config/dev-local.properties` in **dev** via `quarkus.config.locations` using `${user.dir}` so it works both in terminal and IDE run configs.
+- If you still see preflight/CORS errors, keep `quarkus.http.cors.headers=*` (recommended for dev) or add the exact headers shown in the browser preflight request.
+
+
+## CORS (dev)
+
+The browser PWA needs CORS when calling the API from `http://localhost:5173`.
+
+Create a local (uncommitted) overrides file:
+
+```bash
+mkdir -p config
+cp config/dev-local.properties.example config/dev-local.properties
+```
+
+Edit `config/dev-local.properties` and set `modeller.cors.origins` to your PWA origin.
+
+Restart `./mvnw quarkus:dev`.

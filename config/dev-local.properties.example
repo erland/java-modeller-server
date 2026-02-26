@@ -1,0 +1,12 @@
+# Local developer-only Quarkus overrides (DO NOT COMMIT dev-local.properties)
+#
+# Put your local, machine-specific origins here.
+# You can list multiple comma-separated origins.
+#
+# Example for Vite dev server:
+# modeller.cors.origins=http://localhost:5173
+#
+# If you need additional headers beyond the defaults:
+# modeller.cors.headers=Accept,Authorization,Content-Type,If-Match
+
+modeller.cors.origins=http://localhost:5173

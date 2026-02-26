@@ -1,9 +1,17 @@
 services:
   keycloak:
     image: quay.io/keycloak/keycloak:25.0
-    command: ["start-dev"]
+    # Import realm on each start (no persistent volume), then provision dev users from a local file.
+    entrypoint: ["bash","/opt/keycloak/entrypoint.sh"]
     environment:
       KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_DEV_USERS_FILE: /opt/keycloak/dev-users.list
+    env_file:
+      - ./keycloak/keycloak.secrets.env
+      - ./keycloak/keycloak.urls.env
     ports:
       - "18080:8080"
+    volumes:
+      - ./keycloak/entrypoint.sh:/opt/keycloak/entrypoint.sh:ro
+      - ./keycloak/import:/opt/keycloak/data/import
+      - ./keycloak/dev-users.list:/opt/keycloak/dev-users.list:ro

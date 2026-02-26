@@ -8,3 +8,15 @@ target/
 .DS_Store
 .env
 *.zip
+keycloak/keycloak.secrets.env
+
+keycloak/dev-users.list
+
+# Keycloak dev secrets / local-only config
+/keycloak/keycloak.secrets.env
+/keycloak/keycloak.urls.env
+/keycloak/dev-users.list
+/keycloak/import/modeller-realm.json
+
+# Local dev config (not committed)
+/config/dev-local.properties

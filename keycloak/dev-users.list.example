@@ -1,0 +1,4 @@
+# One user per line (comma-separated): username,password,email,firstName,lastName
+# Lines starting with # are ignored.
+admin,change-me-admin-user,admin@example.local,Admin,User
+user,change-me-user,user@example.local,Dev,User
