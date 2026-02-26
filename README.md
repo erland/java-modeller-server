@@ -7,6 +7,7 @@ This bundle is intended to be **self-contained** for starting development in a n
 - `docs/development-plan.md` — Phase 1 development plan with technical choices, structure, schema, API behaviors, and verification.
 - `docs/phase1-step-by-step-plan-A.md` — Step-by-step Phase 1 implementation plan (server only).
 - `docs/api-examples.md` — Concrete REST examples (headers + JSON payloads) including ETag/If-Match conflict handling.
+- `docs/ops-deployment.md` — Ops/deployment posture (migrations strategy, multi-instance notes).
 
 ## Repo
 Intended GitHub repository: `java-modeller-server`
@@ -87,3 +88,38 @@ Run tests:
 - `./mvnw test`
 
 In dev (with Docker) Quarkus Dev Services will start PostgreSQL automatically.
+
+## Step 11 status (Ops & deployment posture)
+
+### Recommended runtime baseline
+- **Build/runtime JDK:** 21 (supported and stable for Quarkus 3.x)
+- **DB:** PostgreSQL 16+
+- **Identity provider:** Keycloak (OIDC)
+
+### Migrations posture (Flyway)
+This project uses Flyway migrations in `src/main/resources/db/migration`.
+
+**Profiles**
+- `%dev`: `quarkus.flyway.migrate-at-start=true` (developer convenience)
+- `%test`: `quarkus.flyway.migrate-at-start=true` (integration tests)
+- `%prod`: **default is `false`** (recommended)
+
+**Why disable migrate-at-start in prod?**
+In multi-instance deployments (2+ replicas), letting every instance attempt migrations at startup can slow deploys and create confusing failure modes. Flyway uses DB locks to serialize migrations, but the recommended operational posture is:
+
+- Run migrations as a **separate, explicit step** (CI/CD job, init container, one-off task), then
+- Start/roll the application instances normally.
+
+**If you do want the app to run migrations in prod**
+Ensure only **one** instance has `quarkus.flyway.migrate-at-start=true` during rollout (e.g., a dedicated “migration” job/instance), then scale up the rest with it off.
+
+### Production config (environment variables)
+Typical prod configuration is supplied via environment variables / external config:
+
+- `QUARKUS_DATASOURCE_JDBC_URL`
+- `QUARKUS_DATASOURCE_USERNAME`
+- `QUARKUS_DATASOURCE_PASSWORD`
+- `QUARKUS_OIDC_AUTH_SERVER_URL`
+- `QUARKUS_OIDC_CLIENT_ID`
+
+See `src/main/resources/application.properties` for examples.
