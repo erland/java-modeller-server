@@ -1,31 +1,40 @@
 package info.isaksson.erland.modeller.server.api;
 
-import java.util.LinkedHashMap;
-import java.util.Map;
-
+import info.isaksson.erland.modeller.server.security.PrincipalInfo;
+import info.isaksson.erland.modeller.server.security.SecurityIdentityMapper;
+import io.quarkus.security.Authenticated;
+import io.quarkus.security.identity.SecurityIdentity;
+import jakarta.inject.Inject;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 /**
- * Phase 1 / Step 1 stub endpoint.
+ * Returns information about the current authenticated user.
  *
- * Later steps will protect this with OIDC and return the authenticated principal.
+ * Phase 1: protected by OIDC (Keycloak). During tests we use quarkus-test-security.
  */
 @Path("/me")
 @Produces(MediaType.APPLICATION_JSON)
 public class MeResource {
 
+    @Inject
+    SecurityIdentity identity;
+
     @GET
+    @Authenticated
     public Map<String, Object> me() {
-        // NOTE: Map.of(...) does not allow null values; this endpoint intentionally returns nulls
-        // until OIDC is implemented in Step 5.
+        PrincipalInfo me = SecurityIdentityMapper.toPrincipalInfo(identity);
+
         Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("authenticated", false);
-        payload.put("subject", null);
-        payload.put("username", null);
-        payload.put("email", null);
+        payload.put("authenticated", identity != null && !identity.isAnonymous());
+        payload.put("subject", me.subject());
+        payload.put("username", me.username());
+        payload.put("email", me.email());
         return payload;
     }
 }
