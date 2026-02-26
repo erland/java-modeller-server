@@ -43,3 +43,20 @@ If you want to explicitly point Quarkus to it, set (for example) in `application
 - `%dev.quarkus.datasource.jdbc.url=jdbc:postgresql://localhost:5432/modeller`
 
 (Dev Services is used when no JDBC URL is set.)
+
+
+## Step 3 — Flyway baseline
+
+This project uses **Flyway** for database schema migrations.
+
+- Migrations are located under `src/main/resources/db/migration/`.
+- In the **dev** profile, migrations run automatically on startup (`%dev.quarkus.flyway.migrate-at-start=true`).
+- In the **test** profile, Flyway is disabled for now (`%test.quarkus.flyway.enabled=false`) to keep Step 1/2 tests DB-free. We'll enable DB-backed integration tests in later steps.
+
+To see migrations apply in dev:
+
+```bash
+./mvnw quarkus:dev
+```
+
+Then check logs for Flyway migration output.
