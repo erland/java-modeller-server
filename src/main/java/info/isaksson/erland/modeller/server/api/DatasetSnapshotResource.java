@@ -4,8 +4,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import info.isaksson.erland.modeller.server.api.dto.SnapshotResponse;
+import info.isaksson.erland.modeller.server.api.dto.SnapshotConflictResponse;
 import info.isaksson.erland.modeller.server.domain.Role;
 import info.isaksson.erland.modeller.server.persistence.entities.DatasetEntity;
+import info.isaksson.erland.modeller.server.persistence.entities.DatasetAuditEntity;
 import info.isaksson.erland.modeller.server.persistence.entities.DatasetSnapshotLatestEntity;
 import info.isaksson.erland.modeller.server.persistence.repositories.DatasetAclRepository;
 import info.isaksson.erland.modeller.server.persistence.repositories.DatasetAuditRepository;
@@ -17,14 +19,19 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.HeaderParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.EntityTag;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import jakarta.transaction.Transactional;
 
 import java.time.OffsetDateTime;
 import java.util.UUID;
+import java.util.Map;
 
 /**
  * Snapshot read endpoint (Phase 1): returns the latest snapshot for a dataset.
@@ -130,4 +137,143 @@ public class DatasetSnapshotResource {
                 .tag(new EntityTag(etagValue))
                 .build();
     }
+@PUT
+@Consumes(MediaType.APPLICATION_JSON)
+@Transactional
+public Response putLatest(@PathParam("datasetId") UUID datasetId,
+                          @HeaderParam("If-Match") String ifMatch,
+                          JsonNode payload) {
+    PrincipalInfo principal = authz.currentPrincipal();
+
+    // Require at least EDITOR to write snapshots
+    Role role = aclRepository.findRole(datasetId, principal.subject())
+            .orElseThrow(() -> new NotFoundException("Dataset not found"));
+    if (!role.atLeast(Role.EDITOR)) {
+        throw new jakarta.ws.rs.ForbiddenException("Insufficient role for dataset");
+    }
+
+    DatasetEntity ds = datasetRepository.findById(datasetId);
+    if (ds == null || ds.deletedAt != null) {
+        throw new NotFoundException("Dataset not found");
+    }
+
+    if (ifMatch == null || ifMatch.isBlank()) {
+        // Step 9: requires If-Match (client must send "0" for first write)
+        return Response.status(428)
+                .entity(Map.of(
+                        "error", "precondition_required",
+                        "message", "Missing If-Match header"
+                ))
+                .type(MediaType.APPLICATION_JSON)
+                .build();
+    }
+
+    String expected = normalizeIfMatch(ifMatch);
+
+    DatasetSnapshotLatestEntity latest = snapshotRepository.findById(datasetId);
+    String currentEtag = latest == null ? "0" : (latest.etag != null ? latest.etag : String.valueOf(latest.revision));
+    long currentRevision = latest == null ? 0L : latest.revision;
+
+    if (!expected.equals(currentEtag)) {
+        // Conflict: include current revision and best-effort who/when
+        String savedBy = auditRepository.findLatestActorForDatasetAndAction(datasetId, "SNAPSHOT_SAVE").orElse(null);
+        OffsetDateTime savedAt = latest == null ? null : latest.updatedAt;
+
+        SnapshotConflictResponse conflict = new SnapshotConflictResponse(
+                datasetId,
+                currentRevision,
+                currentEtag,
+                savedAt,
+                savedBy
+        );
+
+        return Response.status(Response.Status.CONFLICT)
+                .tag(new EntityTag(currentEtag))
+                .entity(conflict)
+                .build();
+    }
+
+    if (payload == null) {
+        throw new jakarta.ws.rs.BadRequestException("Snapshot payload is required");
+    }
+
+    // Normalize payload: always store as JSON object
+    String payloadJson;
+    try {
+        payloadJson = objectMapper.writeValueAsString(payload);
+    } catch (Exception e) {
+        throw new jakarta.ws.rs.BadRequestException("Invalid JSON payload", e);
+    }
+
+    long newRevision = currentRevision + 1L;
+    String newEtag = String.valueOf(newRevision);
+    OffsetDateTime now = OffsetDateTime.now();
+
+    DatasetSnapshotLatestEntity entity = latest;
+    if (entity == null) {
+        entity = new DatasetSnapshotLatestEntity();
+        entity.datasetId = datasetId;
+    }
+    entity.revision = newRevision;
+    entity.etag = newEtag;
+    entity.payloadJson = payloadJson;
+    entity.updatedAt = now;
+
+    if (latest == null) {
+        snapshotRepository.persist(entity);
+    }
+
+    // Update dataset metadata (Phase 1: updatedAt only)
+    ds.updatedAt = now;
+
+    // Write audit entry
+    DatasetAuditEntity audit = new DatasetAuditEntity();
+    audit.datasetId = datasetId;
+    audit.actorSub = principal.subject();
+    audit.action = "SNAPSHOT_SAVE";
+    audit.createdAt = now;
+    audit.detailsJson = objectMapper.createObjectNode()
+            .put("previousRevision", currentRevision)
+            .put("newRevision", newRevision)
+            .put("etag", newEtag)
+            .toString();
+    auditRepository.persist(audit);
+
+    // Response mirrors GET semantics
+    Integer schemaVersion = null;
+    try {
+        JsonNode stored = objectMapper.readTree(payloadJson);
+        if (stored.has("schemaVersion") && stored.get("schemaVersion").canConvertToInt()) {
+            schemaVersion = stored.get("schemaVersion").intValue();
+        }
+    } catch (Exception ignore) {
+        // ignore: we already stored JSON
+    }
+
+    SnapshotResponse body = new SnapshotResponse(
+            datasetId,
+            newRevision,
+            now,
+            principal.subject(),
+            now,
+            principal.subject(),
+            schemaVersion,
+            payload
+    );
+
+    return Response.ok(body)
+            .tag(new EntityTag(newEtag))
+            .build();
+}
+
+private static String normalizeIfMatch(String ifMatch) {
+    String token = ifMatch.split(",")[0].trim();
+    if (token.startsWith("W/")) {
+        token = token.substring(2).trim();
+    }
+    if (token.startsWith("\"") && token.endsWith("\"") && token.length() >= 2) {
+        token = token.substring(1, token.length() - 1);
+    }
+    return token.trim();
+}
 }
