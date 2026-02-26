@@ -28,6 +28,17 @@ public class DatasetEntity {
     @Column(name = "updated_at", nullable = false)
     public OffsetDateTime updatedAt;
 
+
+    @Column(name = "created_by")
+    public String createdBy;
+
+    @Column(name = "updated_by")
+    public String updatedBy;
+
+    @Column(name = "current_revision", nullable = false)
+    public long currentRevision;
+
+
     @Column(name = "archived_at")
     public OffsetDateTime archivedAt;
 

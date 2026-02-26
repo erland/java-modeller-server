@@ -41,6 +41,9 @@ public class TestDataFactory {
         ds.updatedAt = now;
         ds.archivedAt = null;
         ds.deletedAt = null;
+        ds.createdBy = userSub;
+        ds.updatedBy = userSub;
+        ds.currentRevision = 0;
         datasetRepository.persist(ds);
 
         DatasetAclEntity acl = new DatasetAclEntity();

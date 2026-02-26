@@ -234,10 +234,11 @@ public class DatasetSnapshotResource {
         snapshotRepository.persist(entity);
     }
 
-    // Update dataset metadata (Phase 1: updatedAt only)
+    // Update dataset metadata (Phase 1)
     ds.updatedAt = now;
+    ds.updatedBy = principal.subject();
+    ds.currentRevision = newRevision;
 
-    
     // Derive schemaVersion from payload (best-effort)
     Integer schemaVersion = null;
     try {

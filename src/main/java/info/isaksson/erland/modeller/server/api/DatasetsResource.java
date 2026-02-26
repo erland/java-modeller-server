@@ -77,8 +77,12 @@ public class DatasetsResource {
         ds.description = description;
         ds.createdAt = now;
         ds.updatedAt = now;
+        ds.updatedBy = principal.subject();
         ds.archivedAt = null;
         ds.deletedAt = null;
+        ds.createdBy = principal.subject();
+        ds.updatedBy = principal.subject();
+        ds.currentRevision = 0;
 
         datasetRepository.persist(ds);
 
@@ -181,6 +185,7 @@ public class DatasetsResource {
         OffsetDateTime now = OffsetDateTime.now();
         ds.archivedAt = now;
         ds.updatedAt = now;
+        ds.updatedBy = principal.subject();
 
         audit.record(ds.id, principal.subject(), "DATASET_ARCHIVE",
                 audit.details().put("archivedAt", now.toString()));
@@ -203,6 +208,7 @@ public class DatasetsResource {
         OffsetDateTime now = OffsetDateTime.now();
         ds.archivedAt = null;
         ds.updatedAt = now;
+        ds.updatedBy = principal.subject();
 
         audit.record(ds.id, principal.subject(), "DATASET_UNARCHIVE",
                 audit.details().put("unarchivedAt", now.toString()));
@@ -226,6 +232,7 @@ public class DatasetsResource {
         OffsetDateTime now = OffsetDateTime.now();
         ds.deletedAt = now;
         ds.updatedAt = now;
+        ds.updatedBy = principal.subject();
 
         audit.record(ds.id, principal.subject(), "DATASET_DELETE",
                 audit.details().put("deletedAt", now.toString()));

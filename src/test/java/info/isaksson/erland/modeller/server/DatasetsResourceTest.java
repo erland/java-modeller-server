@@ -31,6 +31,10 @@ public class DatasetsResourceTest {
                         .body("name", Matchers.equalTo("My Dataset"))
                         .body("description", Matchers.equalTo("Hello"))
                         .body("role", Matchers.equalTo("OWNER"))
+                        .body("createdBy", Matchers.equalTo("alice"))
+                        .body("updatedBy", Matchers.equalTo("alice"))
+                        .body("currentRevision", Matchers.equalTo(0))
+                        .body("status", Matchers.equalTo("ACTIVE"))
                         .extract().jsonPath().getUUID("id");
 
         org.junit.jupiter.api.Assertions.assertEquals(1, dataFactory.countAudit(id, "DATASET_CREATE"));
@@ -76,7 +80,8 @@ public class DatasetsResourceTest {
                 .post("/datasets/" + id + "/archive")
         .then()
                 .statusCode(200)
-                .body("archivedAt", Matchers.notNullValue());
+                .body("archivedAt", Matchers.notNullValue())
+                .body("status", Matchers.equalTo("ARCHIVED"));
 
         // Unarchive
         given()
@@ -84,7 +89,8 @@ public class DatasetsResourceTest {
                 .post("/datasets/" + id + "/unarchive")
         .then()
                 .statusCode(200)
-                .body("archivedAt", Matchers.nullValue());
+                .body("archivedAt", Matchers.nullValue())
+                .body("status", Matchers.equalTo("ACTIVE"));
 
         // Delete (soft)
         given()
