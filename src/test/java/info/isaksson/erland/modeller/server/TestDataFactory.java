@@ -51,6 +51,16 @@ public class TestDataFactory {
     }
 
     @Transactional
+    public void grantAcl(UUID datasetId, String userSub, String role) {
+        OffsetDateTime now = OffsetDateTime.now();
+        DatasetAclEntity acl = new DatasetAclEntity();
+        acl.id = new DatasetAclId(datasetId, userSub);
+        acl.role = role;
+        acl.createdAt = now;
+        aclRepository.persist(acl);
+    }
+
+    @Transactional
     public void createSnapshot(UUID datasetId, long revision, int schemaVersion) throws Exception {
         DatasetSnapshotLatestEntity s = new DatasetSnapshotLatestEntity();
         s.datasetId = datasetId;

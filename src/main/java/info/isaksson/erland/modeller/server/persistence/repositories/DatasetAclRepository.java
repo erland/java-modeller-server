@@ -30,15 +30,44 @@ public class DatasetAclRepository implements PanacheRepositoryBase<DatasetAclEnt
         }
     }
 
-
-public List<UUID> findDatasetIdsForUser(String userSub) {
-    if (userSub == null || userSub.isBlank()) {
-        return List.of();
+    public List<UUID> findDatasetIdsForUser(String userSub) {
+        if (userSub == null || userSub.isBlank()) {
+            return List.of();
+        }
+        return find("id.userSub", userSub).stream()
+                .map(e -> e.id != null ? e.id.datasetId : null)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .toList();
     }
-    return find("id.userSub", userSub).stream()
-            .map(e -> e.id != null ? e.id.datasetId : null)
-            .filter(java.util.Objects::nonNull)
-            .distinct()
-            .toList();
-}
+
+    public List<DatasetAclEntity> listEntries(UUID datasetId) {
+        if (datasetId == null) return List.of();
+        return list("id.datasetId", datasetId);
+    }
+
+    public long countOwners(UUID datasetId) {
+        if (datasetId == null) return 0;
+        return count("id.datasetId = ?1 and role = ?2", datasetId, Role.OWNER.name());
+    }
+
+    public void upsert(UUID datasetId, String userSub, Role role, java.time.OffsetDateTime createdAtIfNew) {
+        DatasetAclId id = new DatasetAclId(datasetId, userSub);
+        DatasetAclEntity existing = findById(id);
+        if (existing == null) {
+            DatasetAclEntity e = new DatasetAclEntity();
+            e.id = id;
+            e.role = role.name();
+            e.createdAt = createdAtIfNew;
+            persist(e);
+        } else {
+            existing.role = role.name();
+            persist(existing);
+        }
+    }
+
+    public boolean deleteEntry(UUID datasetId, String userSub) {
+        if (datasetId == null || userSub == null || userSub.isBlank()) return false;
+        return deleteById(new DatasetAclId(datasetId, userSub));
+    }
 }
