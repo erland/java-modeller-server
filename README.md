@@ -72,3 +72,9 @@ Then check logs for Flyway migration output.
 
 ### Java version
 Build and run the server with **JDK 21** (recommended baseline for this project).
+
+
+## Step 6 — Authorization model (dataset ACL)
+
+Implemented the dataset-level role model (OWNER/EDITOR/VIEWER) and a reusable authorization service (`DatasetAuthorizationService`) that checks the current principal against dataset ACL entries.
+
