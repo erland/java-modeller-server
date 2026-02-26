@@ -9,6 +9,7 @@ import info.isaksson.erland.modeller.server.persistence.entities.DatasetAclEntit
 import info.isaksson.erland.modeller.server.persistence.repositories.DatasetAclRepository;
 import info.isaksson.erland.modeller.server.persistence.repositories.DatasetRepository;
 import info.isaksson.erland.modeller.server.security.DatasetAuthorizationService;
+import info.isaksson.erland.modeller.server.security.AuditService;
 import info.isaksson.erland.modeller.server.security.PrincipalInfo;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
@@ -36,14 +37,17 @@ public class DatasetAclResource {
     private final DatasetRepository datasetRepository;
     private final DatasetAclRepository aclRepository;
     private final DatasetAuthorizationService authz;
+    private final AuditService audit;
 
     @Inject
     public DatasetAclResource(DatasetRepository datasetRepository,
                              DatasetAclRepository aclRepository,
-                             DatasetAuthorizationService authz) {
+                             DatasetAuthorizationService authz,
+                             AuditService audit) {
         this.datasetRepository = datasetRepository;
         this.aclRepository = aclRepository;
         this.authz = authz;
+        this.audit = audit;
     }
 
     @GET
@@ -104,6 +108,15 @@ public class DatasetAclResource {
         OffsetDateTime now = OffsetDateTime.now();
         aclRepository.upsert(datasetId, userSub, newRole, now);
 
+        String action = existingRole == null ? "ACL_GRANT" : (existingRole == newRole ? null : "ACL_ROLE_CHANGE");
+        if (action != null) {
+            audit.record(datasetId, principal.subject(), action,
+                    audit.details()
+                            .put("targetUserSub", userSub)
+                            .put("previousRole", existingRole == null ? null : existingRole.name())
+                            .put("newRole", newRole.name()));
+        }
+
         DatasetAclEntity saved = aclRepository.findById(new info.isaksson.erland.modeller.server.persistence.entities.DatasetAclId(datasetId, userSub));
         OffsetDateTime createdAt = saved != null ? saved.createdAt : (existingRole == null ? now : null);
 
@@ -139,6 +152,10 @@ public class DatasetAclResource {
         }
 
         aclRepository.deleteEntry(datasetId, userSub);
+
+        audit.record(datasetId, principal.subject(), "ACL_REVOKE",
+                audit.details().put("targetUserSub", userSub).put("previousRole", existingRole.name()));
+
         return Response.noContent().build();
     }
 

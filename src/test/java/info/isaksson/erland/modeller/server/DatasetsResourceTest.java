@@ -3,6 +3,7 @@ package info.isaksson.erland.modeller.server;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.security.TestSecurity;
 import io.restassured.http.ContentType;
+import jakarta.inject.Inject;
 import org.hamcrest.Matchers;
 import org.junit.jupiter.api.Test;
 
@@ -12,6 +13,8 @@ import static io.restassured.RestAssured.given;
 
 @QuarkusTest
 public class DatasetsResourceTest {
+
+    @Inject TestDataFactory dataFactory;
 
     @Test
     @TestSecurity(user = "alice")
@@ -29,6 +32,8 @@ public class DatasetsResourceTest {
                         .body("description", Matchers.equalTo("Hello"))
                         .body("role", Matchers.equalTo("OWNER"))
                         .extract().jsonPath().getUUID("id");
+
+        org.junit.jupiter.api.Assertions.assertEquals(1, dataFactory.countAudit(id, "DATASET_CREATE"));
 
         given()
         .when()
@@ -51,6 +56,8 @@ public class DatasetsResourceTest {
                 .then()
                         .statusCode(201)
                         .extract().jsonPath().getUUID("id");
+
+        org.junit.jupiter.api.Assertions.assertEquals(1, dataFactory.countAudit(id, "DATASET_CREATE"));
 
         // Update metadata (owner only in Phase 1)
         given()
@@ -85,6 +92,12 @@ public class DatasetsResourceTest {
                 .delete("/datasets/" + id)
         .then()
                 .statusCode(204);
+
+        org.junit.jupiter.api.Assertions.assertEquals(1, dataFactory.countAudit(id, "DATASET_CREATE"));
+        org.junit.jupiter.api.Assertions.assertEquals(1, dataFactory.countAudit(id, "DATASET_UPDATE"));
+        org.junit.jupiter.api.Assertions.assertEquals(1, dataFactory.countAudit(id, "DATASET_ARCHIVE"));
+        org.junit.jupiter.api.Assertions.assertEquals(1, dataFactory.countAudit(id, "DATASET_UNARCHIVE"));
+        org.junit.jupiter.api.Assertions.assertEquals(1, dataFactory.countAudit(id, "DATASET_DELETE"));
 
         // Not readable after delete
         given()

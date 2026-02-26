@@ -11,6 +11,7 @@ import info.isaksson.erland.modeller.server.persistence.entities.DatasetEntity;
 import info.isaksson.erland.modeller.server.persistence.repositories.DatasetAclRepository;
 import info.isaksson.erland.modeller.server.persistence.repositories.DatasetRepository;
 import info.isaksson.erland.modeller.server.security.DatasetAuthorizationService;
+import info.isaksson.erland.modeller.server.security.AuditService;
 import info.isaksson.erland.modeller.server.security.PrincipalInfo;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
@@ -44,14 +45,17 @@ public class DatasetsResource {
     private final DatasetRepository datasetRepository;
     private final DatasetAclRepository aclRepository;
     private final DatasetAuthorizationService authz;
+    private final AuditService audit;
 
     @Inject
     public DatasetsResource(DatasetRepository datasetRepository,
                             DatasetAclRepository aclRepository,
-                            DatasetAuthorizationService authz) {
+                            DatasetAuthorizationService authz,
+                            AuditService audit) {
         this.datasetRepository = datasetRepository;
         this.aclRepository = aclRepository;
         this.authz = authz;
+        this.audit = audit;
     }
 
     @POST
@@ -84,6 +88,9 @@ public class DatasetsResource {
         acl.role = Role.OWNER.name();
         acl.createdAt = now;
         aclRepository.persist(acl);
+
+        audit.record(ds.id, principal.subject(), "DATASET_CREATE",
+                audit.details().put("name", ds.name).put("description", ds.description));
 
         DatasetResponse resp = DatasetMapper.toResponse(ds, Role.OWNER);
         return Response.status(Response.Status.CREATED).entity(resp).build();
@@ -141,10 +148,20 @@ public class DatasetsResource {
 
         if (req == null) throw new BadRequestException("Request body is required");
 
+        String beforeName = ds.name;
+        String beforeDescription = ds.description;
+
         ds.name = DatasetMetadataPolicy.normalizeAndValidateName(req.name);
         ds.description = DatasetMetadataPolicy.normalizeAndValidateDescription(req.description);
         ds.updatedAt = OffsetDateTime.now();
         datasetRepository.persist(ds);
+
+        audit.record(ds.id, principal.subject(), "DATASET_UPDATE",
+                audit.details()
+                        .put("beforeName", beforeName)
+                        .put("afterName", ds.name)
+                        .put("beforeDescription", beforeDescription)
+                        .put("afterDescription", ds.description));
 
         return DatasetMapper.toResponse(ds, role);
     }
@@ -165,6 +182,9 @@ public class DatasetsResource {
         ds.archivedAt = now;
         ds.updatedAt = now;
 
+        audit.record(ds.id, principal.subject(), "DATASET_ARCHIVE",
+                audit.details().put("archivedAt", now.toString()));
+
         return DatasetMapper.toResponse(ds, role);
     }
 
@@ -183,6 +203,9 @@ public class DatasetsResource {
         OffsetDateTime now = OffsetDateTime.now();
         ds.archivedAt = null;
         ds.updatedAt = now;
+
+        audit.record(ds.id, principal.subject(), "DATASET_UNARCHIVE",
+                audit.details().put("unarchivedAt", now.toString()));
 
         return DatasetMapper.toResponse(ds, role);
     }
@@ -203,6 +226,9 @@ public class DatasetsResource {
         OffsetDateTime now = OffsetDateTime.now();
         ds.deletedAt = now;
         ds.updatedAt = now;
+
+        audit.record(ds.id, principal.subject(), "DATASET_DELETE",
+                audit.details().put("deletedAt", now.toString()));
 
         return Response.noContent().build();
     }

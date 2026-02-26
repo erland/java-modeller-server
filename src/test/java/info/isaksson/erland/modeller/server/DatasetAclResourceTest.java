@@ -47,6 +47,9 @@ public class DatasetAclResourceTest {
                 .then()
                 .statusCode(204);
 
+        org.junit.jupiter.api.Assertions.assertEquals(1, data.countAudit(datasetId, "ACL_GRANT"));
+        org.junit.jupiter.api.Assertions.assertEquals(1, data.countAudit(datasetId, "ACL_REVOKE"));
+
         // cannot revoke last owner
         given()
                 .when().delete("/datasets/" + datasetId + "/acl/alice")

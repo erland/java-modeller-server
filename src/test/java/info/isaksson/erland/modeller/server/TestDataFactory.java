@@ -8,6 +8,7 @@ import info.isaksson.erland.modeller.server.persistence.entities.DatasetSnapshot
 import info.isaksson.erland.modeller.server.persistence.repositories.DatasetAclRepository;
 import info.isaksson.erland.modeller.server.persistence.repositories.DatasetRepository;
 import info.isaksson.erland.modeller.server.persistence.repositories.DatasetSnapshotLatestRepository;
+import info.isaksson.erland.modeller.server.persistence.repositories.DatasetAuditRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
@@ -25,6 +26,7 @@ public class TestDataFactory {
     @Inject DatasetRepository datasetRepository;
     @Inject DatasetAclRepository aclRepository;
     @Inject DatasetSnapshotLatestRepository snapshotRepository;
+    @Inject DatasetAuditRepository auditRepository;
     @Inject ObjectMapper objectMapper;
 
     @Transactional
@@ -73,4 +75,16 @@ public class TestDataFactory {
         s.updatedAt = OffsetDateTime.now();
         snapshotRepository.persist(s);
     }
+
+
+    @Transactional
+    public long countAudit(UUID datasetId, String action) {
+        return auditRepository.countForDatasetAndAction(datasetId, action);
+    }
+
+    @Transactional
+    public java.util.List<String> listAuditActions(UUID datasetId) {
+        return auditRepository.listForDataset(datasetId).stream().map(a -> a.action).toList();
+    }
+
 }

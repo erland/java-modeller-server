@@ -19,4 +19,14 @@ public class DatasetAuditRepository implements PanacheRepositoryBase<DatasetAudi
                 .firstResult();
         return e == null ? Optional.empty() : Optional.ofNullable(e.actorSub);
     }
+
+
+    public long countForDatasetAndAction(UUID datasetId, String action) {
+        return count("datasetId = ?1 and action = ?2", datasetId, action);
+    }
+
+    public java.util.List<DatasetAuditEntity> listForDataset(UUID datasetId) {
+        return list("datasetId = ?1 order by createdAt asc", datasetId);
+    }
+
 }
