@@ -74,6 +74,13 @@
       <artifactId>quarkus-flyway</artifactId>
     </dependency>
 
+<!-- Persistence (Hibernate ORM + Panache) (Step 4) -->
+<dependency>
+  <groupId>io.quarkus</groupId>
+  <artifactId>quarkus-hibernate-orm-panache</artifactId>
+</dependency>
+
+
     <!-- Testing -->
     <dependency>
       <groupId>io.quarkus</groupId>

@@ -6,7 +6,7 @@ WRAPPER_DIR="$BASEDIR/.mvn/wrapper"
 JAR="$WRAPPER_DIR/maven-wrapper.jar"
 PROPS="$WRAPPER_DIR/maven-wrapper.properties"
 
-if [ ! -f "$JAR" ]; then
+if [ ! -s "$JAR" ]; then
   echo "Downloading Maven Wrapper jar..."
   mkdir -p "$WRAPPER_DIR"
   # URL from properties (wrapperUrl) if present, else default

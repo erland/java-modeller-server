@@ -60,3 +60,15 @@ To see migrations apply in dev:
 ```
 
 Then check logs for Flyway migration output.
+
+
+## Progress
+- Step 1: Quarkus skeleton + module layout ✅
+- Step 2: PostgreSQL connectivity + dev services ✅
+- Step 3: Flyway + first migration baseline ✅
+- Step 4: Phase 1 data model (domain + persistence) ✅
+
+## Troubleshooting
+
+### Java version
+Build and run the server with **JDK 21** (recommended baseline for this project).
