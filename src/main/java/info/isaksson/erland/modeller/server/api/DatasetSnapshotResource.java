@@ -32,6 +32,9 @@ import jakarta.transaction.Transactional;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 import java.util.Map;
+import info.isaksson.erland.modeller.server.persistence.entities.DatasetSnapshotHistoryEntity;
+import info.isaksson.erland.modeller.server.persistence.repositories.DatasetSnapshotHistoryRepository;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 /**
  * Snapshot read endpoint (Phase 1): returns the latest snapshot for a dataset.
@@ -43,6 +46,12 @@ public class DatasetSnapshotResource {
     private final DatasetRepository datasetRepository;
     private final DatasetAclRepository aclRepository;
     private final DatasetSnapshotLatestRepository snapshotRepository;
+
+    @jakarta.inject.Inject
+    DatasetSnapshotHistoryRepository historyRepository;
+
+    @ConfigProperty(name = "modeller.snapshot.history.keep", defaultValue = "20")
+    int snapshotHistoryKeep;
     private final DatasetAuditRepository auditRepository;
     private final DatasetAuthorizationService authz;
     private final ObjectMapper objectMapper;
@@ -137,10 +146,12 @@ public class DatasetSnapshotResource {
                 .tag(new EntityTag(etagValue))
                 .build();
     }
-@PUT
-@Consumes(MediaType.APPLICATION_JSON)
-@Transactional
-public Response putLatest(@PathParam("datasetId") UUID datasetId,
+
+
+    @PUT
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Transactional
+    public Response putLatest(@PathParam("datasetId") UUID datasetId,
                           @HeaderParam("If-Match") String ifMatch,
                           JsonNode payload) {
     PrincipalInfo principal = authz.currentPrincipal();
@@ -226,7 +237,19 @@ public Response putLatest(@PathParam("datasetId") UUID datasetId,
     // Update dataset metadata (Phase 1: updatedAt only)
     ds.updatedAt = now;
 
-    // Write audit entry
+    
+    // Derive schemaVersion from payload (best-effort)
+    Integer schemaVersion = null;
+    try {
+        JsonNode stored = objectMapper.readTree(payloadJson);
+        if (stored.has("schemaVersion") && stored.get("schemaVersion").canConvertToInt()) {
+            schemaVersion = stored.get("schemaVersion").intValue();
+        }
+    } catch (Exception ignore) {
+        // ignore: payload is still stored as JSON
+    }
+
+// Write audit entry
     DatasetAuditEntity audit = new DatasetAuditEntity();
     audit.datasetId = datasetId;
     audit.actorSub = principal.subject();
@@ -239,18 +262,20 @@ public Response putLatest(@PathParam("datasetId") UUID datasetId,
             .toString();
     auditRepository.persist(audit);
 
-    // Response mirrors GET semantics
-    Integer schemaVersion = null;
-    try {
-        JsonNode stored = objectMapper.readTree(payloadJson);
-        if (stored.has("schemaVersion") && stored.get("schemaVersion").canConvertToInt()) {
-            schemaVersion = stored.get("schemaVersion").intValue();
-        }
-    } catch (Exception ignore) {
-        // ignore: we already stored JSON
+    // Optional history: store prior snapshots and prune to keep latest N
+    if (snapshotHistoryKeep > 0) {
+        DatasetSnapshotHistoryEntity hist = new DatasetSnapshotHistoryEntity();
+        hist.datasetId = datasetId;
+        hist.revision = newRevision;
+        hist.etag = newEtag;
+        hist.payloadJson = payloadJson;
+        hist.schemaVersion = schemaVersion;
+        hist.savedAt = now;
+        hist.savedBy = principal.subject();
+        historyRepository.persist(hist);
+        historyRepository.pruneKeepLatest(datasetId, snapshotHistoryKeep);
     }
-
-    SnapshotResponse body = new SnapshotResponse(
+SnapshotResponse body = new SnapshotResponse(
             datasetId,
             newRevision,
             now,
@@ -276,4 +301,7 @@ private static String normalizeIfMatch(String ifMatch) {
     }
     return token.trim();
 }
+
+    
+
 }
