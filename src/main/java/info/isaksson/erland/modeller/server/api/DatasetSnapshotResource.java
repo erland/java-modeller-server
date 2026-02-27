@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import info.isaksson.erland.modeller.server.api.dto.SnapshotResponse;
 import info.isaksson.erland.modeller.server.api.dto.SnapshotConflictResponse;
+import info.isaksson.erland.modeller.server.api.dto.ValidationErrorDto;
+import info.isaksson.erland.modeller.server.api.error.ApiError;
 import info.isaksson.erland.modeller.server.domain.Role;
 import info.isaksson.erland.modeller.server.persistence.entities.DatasetEntity;
 import info.isaksson.erland.modeller.server.persistence.entities.DatasetAuditEntity;
@@ -31,14 +33,17 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.EntityTag;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriInfo;
 import jakarta.transaction.Transactional;
 
 import java.time.OffsetDateTime;
-import java.util.UUID;
 import java.util.Map;
+import java.util.UUID;
+import java.util.stream.Collectors;
 import info.isaksson.erland.modeller.server.persistence.entities.DatasetSnapshotHistoryEntity;
 import info.isaksson.erland.modeller.server.persistence.repositories.DatasetSnapshotHistoryRepository;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.jboss.logging.MDC;
 
 /**
  * Snapshot read endpoint (Phase 1): returns the latest snapshot for a dataset.
@@ -46,6 +51,9 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 @Path("/datasets/{datasetId}/snapshot")
 @Produces(MediaType.APPLICATION_JSON)
 public class DatasetSnapshotResource {
+
+    @jakarta.ws.rs.core.Context
+    UriInfo uriInfo;
 
     private final DatasetRepository datasetRepository;
     private final DatasetAclRepository aclRepository;
@@ -225,19 +233,31 @@ public class DatasetSnapshotResource {
 
 
 
-// Phase 2: validate snapshot payload according to dataset validation policy
-ValidationPolicy policy = ds.validationPolicy == null ? ValidationPolicy.NONE : ds.validationPolicy;
-ValidationResult validation = validationService.validate(payload, payloadJson, policy);
-if (validation.hasErrors()) {
-    return Response.status(Response.Status.BAD_REQUEST)
-            .entity(Map.of(
-                    "error", "validation_failed",
-                    "message", "Snapshot validation failed",
-                    "validationErrors", validation.errors()
-            ))
-            .type(MediaType.APPLICATION_JSON)
-            .build();
-}
+    // Phase 2: validate snapshot payload according to dataset validation policy
+    ValidationPolicy policy = ds.validationPolicy == null ? ValidationPolicy.NONE : ds.validationPolicy;
+    ValidationResult validation = validationService.validate(payload, payloadJson, policy);
+    if (validation.hasErrors()) {
+        String path = uriInfo != null && uriInfo.getPath() != null ? "/" + uriInfo.getPath() : null;
+        String requestId = (String) MDC.get("requestId");
+
+        ApiError err = new ApiError(
+                OffsetDateTime.now(),
+                Response.Status.BAD_REQUEST.getStatusCode(),
+                "VALIDATION_FAILED",
+                "Snapshot validation failed",
+                path,
+                requestId
+        ).withValidationErrors(
+                validation.errors().stream()
+                        .map(ValidationErrorDto::fromIssue)
+                        .collect(Collectors.toList())
+        );
+
+        return Response.status(Response.Status.BAD_REQUEST)
+                .type(MediaType.APPLICATION_JSON)
+                .entity(err)
+                .build();
+    }
     long newRevision = currentRevision + 1L;
     String newEtag = String.valueOf(newRevision);
     OffsetDateTime now = OffsetDateTime.now();

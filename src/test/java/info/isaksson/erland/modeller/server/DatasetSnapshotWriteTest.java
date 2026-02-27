@@ -105,7 +105,11 @@ public void put_snapshot_rejects_missing_schema_version_when_policy_basic() {
             .when().put("/datasets/" + datasetId + "/snapshot")
             .then()
             .statusCode(400)
-            .body("error", equalTo("validation_failed"));
+            .body("code", equalTo("VALIDATION_FAILED"))
+            .body("message", equalTo("Snapshot validation failed"))
+            .body("validationErrors.size()", equalTo(1))
+            .body("validationErrors[0].rule", equalTo("schemaVersion.required"))
+            .body("validationErrors[0].severity", equalTo("ERROR"));
 }
 
 }
