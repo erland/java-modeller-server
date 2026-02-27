@@ -6,12 +6,13 @@ import io.quarkus.hibernate.orm.panache.PanacheRepositoryBase;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @ApplicationScoped
 public class DatasetSnapshotHistoryRepository implements PanacheRepositoryBase<DatasetSnapshotHistoryEntity, DatasetSnapshotHistoryId> {
 
-    public java.util.Optional<DatasetSnapshotHistoryEntity> findByDatasetAndRevision(UUID datasetId, long revision) {
+    public Optional<DatasetSnapshotHistoryEntity> findByDatasetAndRevision(UUID datasetId, long revision) {
         return find("datasetId = ?1 AND revision = ?2", datasetId, revision).firstResultOptional();
     }
 
@@ -29,16 +30,17 @@ public class DatasetSnapshotHistoryRepository implements PanacheRepositoryBase<D
         if (keep <= 0) {
             return;
         }
-        // Single-statement prune to avoid pulling all revisions into memory
-        getEntityManager().createNativeQuery(
+        // Single-statement prune to avoid pulling all revisions into memory.
+        // NOTE: Some drivers/providers don't support binding LIMIT values, so we inline the validated integer.
+        int safeKeep = Math.max(1, Math.min(keep, 10_000));
+        String sql =
                 "DELETE FROM dataset_snapshot_history h " +
                 "WHERE h.dataset_id = :id AND h.revision NOT IN (" +
-                "  SELECT revision FROM dataset_snapshot_history WHERE dataset_id = :id ORDER BY revision DESC LIMIT :keep" +
-                ")"
-        )
-        .setParameter("id", datasetId)
-        .setParameter("keep", keep)
-        .executeUpdate();
+                "  SELECT revision FROM dataset_snapshot_history WHERE dataset_id = :id ORDER BY revision DESC LIMIT " + safeKeep +
+                ")";
+        getEntityManager().createNativeQuery(sql)
+                .setParameter("id", datasetId)
+                .executeUpdate();
     }
 
     public void pruneByMaxAgeDays(UUID datasetId, int maxAgeDays) {
@@ -46,12 +48,11 @@ public class DatasetSnapshotHistoryRepository implements PanacheRepositoryBase<D
             return;
         }
         getEntityManager().createNativeQuery(
-                "DELETE FROM dataset_snapshot_history " +
-                "WHERE dataset_id = :id AND saved_at < (NOW() - (:days || ' days')::interval)"
-        )
-        .setParameter("id", datasetId)
-        .setParameter("days", maxAgeDays)
-        .executeUpdate();
+                        "DELETE FROM dataset_snapshot_history " +
+                        "WHERE dataset_id = :id AND saved_at < (NOW() - (:days || ' days')::interval)"
+                )
+                .setParameter("id", datasetId)
+                .setParameter("days", maxAgeDays)
+                .executeUpdate();
     }
-
 }

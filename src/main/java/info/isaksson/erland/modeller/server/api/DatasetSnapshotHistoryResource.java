@@ -311,13 +311,13 @@ public class DatasetSnapshotHistoryResource {
             hist.schemaVersion = schemaVersion;
             hist.savedAt = now;
             hist.savedBy = principal.subject();
-                    String payloadJson = source.payloadJson;
+            String payloadJson = source.payloadJson;
             hist.payloadBytes = payloadJson == null ? 0 : payloadJson.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
-        hist.savedAction = "RESTORE";
-        hist.savedMessage = "Restored from revision " + revision;
+            hist.savedAction = "RESTORE";
+            hist.savedMessage = "Restored from revision " + revision;
             historyRepository.persist(hist);
             historyRepository.pruneKeepLatest(datasetId, snapshotHistoryKeep);
-        historyRepository.pruneByMaxAgeDays(datasetId, snapshotHistoryMaxAgeDays);
+            historyRepository.pruneByMaxAgeDays(datasetId, snapshotHistoryMaxAgeDays);
         }
 
         SnapshotResponse body = new SnapshotResponse(
