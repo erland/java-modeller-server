@@ -1,6 +1,8 @@
 package info.isaksson.erland.modeller.server.persistence.entities;
 
+import info.isaksson.erland.modeller.server.domain.ValidationPolicy;
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
@@ -37,6 +39,10 @@ public class DatasetEntity {
 
     @Column(name = "current_revision", nullable = false)
     public long currentRevision;
+
+    @Convert(converter = ValidationPolicyConverter.class)
+    @Column(name = "validation_policy", nullable = false)
+    public ValidationPolicy validationPolicy;
 
 
     @Column(name = "archived_at")

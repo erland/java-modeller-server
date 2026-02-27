@@ -1,6 +1,7 @@
 package info.isaksson.erland.modeller.server;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import info.isaksson.erland.modeller.server.domain.ValidationPolicy;
 import info.isaksson.erland.modeller.server.persistence.entities.DatasetAclEntity;
 import info.isaksson.erland.modeller.server.persistence.entities.DatasetAclId;
 import info.isaksson.erland.modeller.server.persistence.entities.DatasetEntity;
@@ -44,6 +45,7 @@ public class TestDataFactory {
         ds.createdBy = userSub;
         ds.updatedBy = userSub;
         ds.currentRevision = 0;
+        ds.validationPolicy = ValidationPolicy.NONE;
         datasetRepository.persist(ds);
 
         DatasetAclEntity acl = new DatasetAclEntity();

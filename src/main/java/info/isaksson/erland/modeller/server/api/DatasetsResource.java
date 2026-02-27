@@ -5,6 +5,7 @@ import info.isaksson.erland.modeller.server.api.dto.DatasetResponse;
 import info.isaksson.erland.modeller.server.api.dto.UpdateDatasetRequest;
 import info.isaksson.erland.modeller.server.domain.DatasetMetadataPolicy;
 import info.isaksson.erland.modeller.server.domain.Role;
+import info.isaksson.erland.modeller.server.domain.ValidationPolicy;
 import info.isaksson.erland.modeller.server.persistence.entities.DatasetAclEntity;
 import info.isaksson.erland.modeller.server.persistence.entities.DatasetAclId;
 import info.isaksson.erland.modeller.server.persistence.entities.DatasetEntity;
@@ -69,6 +70,11 @@ public class DatasetsResource {
         String name = DatasetMetadataPolicy.normalizeAndValidateName(req.name);
         String description = DatasetMetadataPolicy.normalizeAndValidateDescription(req.description);
 
+        ValidationPolicy policy = ValidationPolicy.tryParse(req.validationPolicy).orElse(ValidationPolicy.NONE);
+        if (req.validationPolicy != null && ValidationPolicy.tryParse(req.validationPolicy).isEmpty()) {
+            throw new BadRequestException("Invalid validationPolicy. Allowed: none, basic, strict");
+        }
+
         OffsetDateTime now = OffsetDateTime.now();
 
         DatasetEntity ds = new DatasetEntity();
@@ -83,6 +89,7 @@ public class DatasetsResource {
         ds.createdBy = principal.subject();
         ds.updatedBy = principal.subject();
         ds.currentRevision = 0;
+        ds.validationPolicy = policy;
 
         datasetRepository.persist(ds);
 
@@ -94,7 +101,7 @@ public class DatasetsResource {
         aclRepository.persist(acl);
 
         audit.record(ds.id, principal.subject(), "DATASET_CREATE",
-                audit.details().put("name", ds.name).put("description", ds.description));
+                audit.details().put("name", ds.name).put("description", ds.description).put("validationPolicy", policy.wireValue()));
 
         DatasetResponse resp = DatasetMapper.toResponse(ds, Role.OWNER);
         return Response.status(Response.Status.CREATED).entity(resp).build();
@@ -157,6 +164,13 @@ public class DatasetsResource {
 
         ds.name = DatasetMetadataPolicy.normalizeAndValidateName(req.name);
         ds.description = DatasetMetadataPolicy.normalizeAndValidateDescription(req.description);
+
+        ValidationPolicy beforePolicy = ds.validationPolicy;
+        if (req.validationPolicy != null) {
+            ValidationPolicy parsed = ValidationPolicy.tryParse(req.validationPolicy)
+                    .orElseThrow(() -> new BadRequestException("Invalid validationPolicy. Allowed: none, basic, strict"));
+            ds.validationPolicy = parsed;
+        }
         ds.updatedAt = OffsetDateTime.now();
         datasetRepository.persist(ds);
 
@@ -165,7 +179,9 @@ public class DatasetsResource {
                         .put("beforeName", beforeName)
                         .put("afterName", ds.name)
                         .put("beforeDescription", beforeDescription)
-                        .put("afterDescription", ds.description));
+                        .put("afterDescription", ds.description)
+                        .put("beforeValidationPolicy", beforePolicy != null ? beforePolicy.wireValue() : null)
+                        .put("afterValidationPolicy", ds.validationPolicy != null ? ds.validationPolicy.wireValue() : null));
 
         return DatasetMapper.toResponse(ds, role);
     }

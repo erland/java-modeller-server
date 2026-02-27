@@ -34,6 +34,7 @@ public class DatasetsResourceTest {
                         .body("createdBy", Matchers.equalTo("alice"))
                         .body("updatedBy", Matchers.equalTo("alice"))
                         .body("currentRevision", Matchers.equalTo(0))
+                        .body("validationPolicy", Matchers.equalTo("none"))
                         .body("status", Matchers.equalTo("ACTIVE"))
                         .extract().jsonPath().getUUID("id");
 
@@ -66,13 +67,14 @@ public class DatasetsResourceTest {
         // Update metadata (owner only in Phase 1)
         given()
                 .contentType(ContentType.JSON)
-                .body("{\"name\":\"A2\",\"description\":\"D2\"}")
+                .body("{\"name\":\"A2\",\"description\":\"D2\",\"validationPolicy\":\"basic\"}")
         .when()
                 .put("/datasets/" + id)
         .then()
                 .statusCode(200)
                 .body("name", Matchers.equalTo("A2"))
-                .body("description", Matchers.equalTo("D2"));
+                .body("description", Matchers.equalTo("D2"))
+                .body("validationPolicy", Matchers.equalTo("basic"));
 
         // Archive
         given()

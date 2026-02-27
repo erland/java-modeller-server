@@ -20,6 +20,7 @@ public final class DatasetMapper {
         r.createdBy = e.createdBy;
         r.updatedBy = e.updatedBy;
         r.currentRevision = e.currentRevision;
+        r.validationPolicy = e.validationPolicy != null ? e.validationPolicy.wireValue() : null;
         r.status = deriveStatus(e);
         r.role = role != null ? role.name() : null;
         return r;

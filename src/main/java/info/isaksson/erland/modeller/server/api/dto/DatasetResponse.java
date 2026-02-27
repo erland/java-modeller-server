@@ -27,6 +27,9 @@ public class DatasetResponse {
     /** Latest known snapshot revision (0 if none). */
     public long currentRevision;
 
+    /** Phase 2: none | basic | strict */
+    public String validationPolicy;
+
     /** Derived: ACTIVE | ARCHIVED | DELETED */
     public String status;
 
