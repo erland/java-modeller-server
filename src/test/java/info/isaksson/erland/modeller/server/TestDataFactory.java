@@ -10,6 +10,8 @@ import info.isaksson.erland.modeller.server.persistence.repositories.DatasetAclR
 import info.isaksson.erland.modeller.server.persistence.repositories.DatasetRepository;
 import info.isaksson.erland.modeller.server.persistence.repositories.DatasetSnapshotLatestRepository;
 import info.isaksson.erland.modeller.server.persistence.repositories.DatasetAuditRepository;
+import info.isaksson.erland.modeller.server.persistence.repositories.DatasetLeaseRepository;
+import info.isaksson.erland.modeller.server.persistence.entities.DatasetLeaseEntity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
@@ -28,6 +30,7 @@ public class TestDataFactory {
     @Inject DatasetAclRepository aclRepository;
     @Inject DatasetSnapshotLatestRepository snapshotRepository;
     @Inject DatasetAuditRepository auditRepository;
+    @Inject DatasetLeaseRepository leaseRepository;
     @Inject ObjectMapper objectMapper;
 
     @Transactional
@@ -110,7 +113,21 @@ public UUID createDatasetVisibleTo(String userSub, ValidationPolicy policy) {
     }
 
 
+    
     @Transactional
+    public void createLease(UUID datasetId, String holderSub, long ttlSeconds) {
+        OffsetDateTime now = OffsetDateTime.now();
+        DatasetLeaseEntity e = new DatasetLeaseEntity();
+        e.datasetId = datasetId;
+        e.holderSub = holderSub;
+        e.leaseToken = UUID.randomUUID().toString();
+        e.acquiredAt = now;
+        e.renewedAt = now;
+        e.expiresAt = now.plusSeconds(ttlSeconds);
+        leaseRepository.persist(e);
+    }
+
+@Transactional
     public long countAudit(UUID datasetId, String action) {
         return auditRepository.countForDatasetAndAction(datasetId, action);
     }
