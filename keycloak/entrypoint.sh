@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-KC_SERVER_URL="http://localhost:8080"
+KC_HTTP_RELATIVE_PATH="${KC_HTTP_RELATIVE_PATH:-/auth}"
+KC_SERVER_URL="http://localhost:8080${KC_HTTP_RELATIVE_PATH}"
 KC_REALM="modeller"
 KC_USERS_FILE="${KC_DEV_USERS_FILE:-/opt/keycloak/dev-users.list}"
 
@@ -10,7 +11,8 @@ KC_PWA_ORIGIN="${KC_PWA_ORIGIN:-http://localhost:5173}"
 KC_PWA_REDIRECT_BASE="${KC_PWA_REDIRECT_BASE:-http://localhost:5173/pwa-modeller/}"
 
 IMPORT_DIR="/opt/keycloak/data/import"
-REALM_TEMPLATE="${IMPORT_DIR}/modeller-realm.template.json"
+TEMPLATE_DIR="/opt/keycloak/templates"
+REALM_TEMPLATE="${TEMPLATE_DIR}/modeller-realm.template.json"
 REALM_FILE="${IMPORT_DIR}/modeller-realm.json"
 
 # Ensure redirect base ends with a slash, then append wildcard

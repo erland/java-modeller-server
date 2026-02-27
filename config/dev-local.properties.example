@@ -6,7 +6,18 @@
 # Example for Vite dev server:
 # modeller.cors.origins=http://localhost:5173
 #
+# OIDC (Keycloak) dev override.
+# In the recommended dev setup (edge nginx), Keycloak is reachable at:
+#   http://localhost/auth/realms/modeller
+# If you connect directly to the Keycloak container port instead, use:
+#   http://localhost:18080/auth/realms/modeller
+#
+# quarkus.oidc.auth-server-url=http://localhost/auth/realms/modeller
+#
 # If you need additional headers beyond the defaults:
 # modeller.cors.headers=Accept,Authorization,Content-Type,If-Match
 
 modeller.cors.origins=http://localhost:5173
+
+# Recommended when using the edge nginx dev setup:
+quarkus.oidc.auth-server-url=http://localhost/auth/realms/modeller

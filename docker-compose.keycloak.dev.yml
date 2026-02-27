@@ -5,6 +5,9 @@ services:
     entrypoint: ["bash","/opt/keycloak/entrypoint.sh"]
     environment:
       KEYCLOAK_ADMIN: admin
+      KC_HTTP_RELATIVE_PATH: /auth
+      KC_PROXY: edge
+      KC_HOSTNAME_STRICT: "false"
       KC_DEV_USERS_FILE: /opt/keycloak/dev-users.list
     env_file:
       - ./keycloak/keycloak.secrets.env
@@ -14,4 +17,5 @@ services:
     volumes:
       - ./keycloak/entrypoint.sh:/opt/keycloak/entrypoint.sh:ro
       - ./keycloak/import:/opt/keycloak/data/import
+      - ./keycloak/templates:/opt/keycloak/templates:ro
       - ./keycloak/dev-users.list:/opt/keycloak/dev-users.list:ro

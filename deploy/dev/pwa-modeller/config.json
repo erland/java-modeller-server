@@ -1,0 +1,8 @@
+{
+  "apiBaseUrl": "/api",
+  "oidc": {
+    "issuer": "/auth/realms/modeller",
+    "clientId": "pwa-modeller",
+    "scope": "openid profile email"
+  }
+}

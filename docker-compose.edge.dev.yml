@@ -1,0 +1,55 @@
+version: "3.9"
+
+services:
+  edge-nginx:
+    image: nginx:1.27-alpine
+    container_name: java-modeller-edge-nginx
+    ports:
+      - "80:80"
+    extra_hosts:
+      # Works on Linux (and is harmless on Docker Desktop); allows nginx to reach host services like Vite/Quarkus dev servers.
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./deploy/dev/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./deploy/dev/pwa-modeller/config.json:/etc/nginx/pwa-modeller/config.json:ro
+    depends_on:
+      - keycloak
+
+  postgres:
+    image: postgres:16
+    container_name: java-modeller-server-postgres
+    environment:
+      POSTGRES_DB: modeller
+      POSTGRES_USER: modeller
+      POSTGRES_PASSWORD: modeller
+    ports:
+      - "5432:5432"
+    volumes:
+      - modeller_pgdata:/var/lib/postgresql/data
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0
+    container_name: java-modeller-server-keycloak
+    # Import realm on each start (no persistent volume), then optionally provision dev users from a local file.
+    entrypoint: ["bash","/opt/keycloak/entrypoint.sh"]
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KC_HTTP_RELATIVE_PATH: /auth
+      KC_PROXY: edge
+      KC_HOSTNAME_STRICT: "false"
+      # If dev-users.list exists, entrypoint provisions those users. You can also create users manually in the admin console.
+      KC_DEV_USERS_FILE: /opt/keycloak/dev-users.list
+    env_file:
+      - ./keycloak/keycloak.secrets.env
+      - ./keycloak/keycloak.urls.env
+    ports:
+      # Optional direct access; the preferred access is via http://localhost/auth/ through nginx.
+      - "18080:8080"
+    volumes:
+      - ./keycloak/entrypoint.sh:/opt/keycloak/entrypoint.sh:ro
+      - ./keycloak/import:/opt/keycloak/data/import
+      - ./keycloak/templates:/opt/keycloak/templates:ro
+      - ./keycloak/dev-users.list:/opt/keycloak/dev-users.list:ro
+
+volumes:
+  modeller_pgdata:

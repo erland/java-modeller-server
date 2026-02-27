@@ -1,0 +1,105 @@
+version: "3.9"
+
+services:
+  edge-nginx:
+    image: nginx:1.27-alpine
+    container_name: java-modeller-edge-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./deploy/test/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./deploy/test/pwa-modeller/config.json:/etc/nginx/pwa-modeller/config.json:ro
+    depends_on:
+      - server
+      - keycloak
+      - pwa
+
+  # ----- PWA -----
+  pwa:
+    image: ghcr.io/erland/pwa-modeller:latest
+    container_name: pwa-modeller
+    # No ports exposed; accessed via edge nginx
+    restart: unless-stopped
+
+  # ----- API server -----
+  server:
+    image: ghcr.io/erland/java-modeller-server:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: java-modeller-server
+    environment:
+      QUARKUS_PROFILE: prod
+
+      QUARKUS_DATASOURCE_DB_KIND: postgresql
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/modeller
+      QUARKUS_DATASOURCE_USERNAME: modeller
+      QUARKUS_DATASOURCE_PASSWORD: modeller
+
+      QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/auth/realms/modeller
+      QUARKUS_OIDC_CLIENT_ID: java-modeller-server
+      QUARKUS_OIDC_APPLICATION_TYPE: service
+      QUARKUS_OIDC_TLS_VERIFICATION: none
+
+      # behind reverse proxy
+      QUARKUS_HTTP_PROXY_PROXY_ADDRESS_FORWARDING: "true"
+    depends_on:
+      - postgres
+      - keycloak
+    restart: unless-stopped
+
+  # ----- Postgres (API) -----
+  postgres:
+    image: postgres:16
+    container_name: java-modeller-server-postgres
+    environment:
+      POSTGRES_DB: modeller
+      POSTGRES_USER: modeller
+      POSTGRES_PASSWORD: modeller
+    volumes:
+      - modeller_pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  # ----- Keycloak -----
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0
+    container_name: java-modeller-server-keycloak
+    entrypoint: ["bash","/opt/keycloak/entrypoint.sh"]
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KC_HTTP_RELATIVE_PATH: /auth
+      KC_PROXY: edge
+      KC_HOSTNAME_STRICT: "false"
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloakdb:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: keycloak
+      # Optional: if dev-users.list exists, entrypoint provisions those users.
+      KC_DEV_USERS_FILE: /opt/keycloak/dev-users.list
+    env_file:
+      - ./keycloak/keycloak.secrets.env
+      - ./keycloak/keycloak.urls.env
+    volumes:
+      - ./keycloak/entrypoint.sh:/opt/keycloak/entrypoint.sh:ro
+      - ./keycloak/import:/opt/keycloak/data/import
+      - ./keycloak/templates:/opt/keycloak/templates:ro
+      - ./keycloak/dev-users.list:/opt/keycloak/dev-users.list:ro
+    depends_on:
+      - keycloakdb
+    restart: unless-stopped
+
+  # ----- Postgres (Keycloak) -----
+  keycloakdb:
+    image: postgres:16
+    container_name: java-modeller-keycloak-postgres
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: keycloak
+    volumes:
+      - keycloak_pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  modeller_pgdata:
+  keycloak_pgdata:
