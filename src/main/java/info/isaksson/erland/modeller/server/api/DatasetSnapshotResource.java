@@ -15,6 +15,10 @@ import info.isaksson.erland.modeller.server.persistence.repositories.DatasetRepo
 import info.isaksson.erland.modeller.server.persistence.repositories.DatasetSnapshotLatestRepository;
 import info.isaksson.erland.modeller.server.security.DatasetAuthorizationService;
 import info.isaksson.erland.modeller.server.security.PrincipalInfo;
+import info.isaksson.erland.modeller.server.domain.ValidationPolicy;
+import info.isaksson.erland.modeller.server.validation.SnapshotValidationService;
+import info.isaksson.erland.modeller.server.validation.ValidationResult;
+
 import jakarta.inject.Inject;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.NotFoundException;
@@ -55,6 +59,9 @@ public class DatasetSnapshotResource {
     private final DatasetAuditRepository auditRepository;
     private final DatasetAuthorizationService authz;
     private final ObjectMapper objectMapper;
+
+    @Inject
+    SnapshotValidationService validationService;
 
     @Inject
     public DatasetSnapshotResource(DatasetRepository datasetRepository,
@@ -216,6 +223,21 @@ public class DatasetSnapshotResource {
         throw new jakarta.ws.rs.BadRequestException("Invalid JSON payload", e);
     }
 
+
+
+// Phase 2: validate snapshot payload according to dataset validation policy
+ValidationPolicy policy = ds.validationPolicy == null ? ValidationPolicy.NONE : ds.validationPolicy;
+ValidationResult validation = validationService.validate(payload, payloadJson, policy);
+if (validation.hasErrors()) {
+    return Response.status(Response.Status.BAD_REQUEST)
+            .entity(Map.of(
+                    "error", "validation_failed",
+                    "message", "Snapshot validation failed",
+                    "validationErrors", validation.errors()
+            ))
+            .type(MediaType.APPLICATION_JSON)
+            .build();
+}
     long newRevision = currentRevision + 1L;
     String newEtag = String.valueOf(newRevision);
     OffsetDateTime now = OffsetDateTime.now();

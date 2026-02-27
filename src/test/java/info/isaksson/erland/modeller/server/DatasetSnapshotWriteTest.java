@@ -88,4 +88,24 @@ public class DatasetSnapshotWriteTest {
                 .body("currentRevision", equalTo(5))
                 .body("currentEtag", equalTo("5"));
     }
+
+
+@Test
+@TestSecurity(user = "alice")
+public void put_snapshot_rejects_missing_schema_version_when_policy_basic() {
+    UUID datasetId = data.createDatasetVisibleTo("alice", info.isaksson.erland.modeller.server.domain.ValidationPolicy.BASIC);
+
+    ObjectNode payload = objectMapper.createObjectNode()
+            .set("model", objectMapper.createObjectNode());
+
+    given()
+            .header("If-Match", "\"0\"")
+            .contentType("application/json")
+            .body(payload.toString())
+            .when().put("/datasets/" + datasetId + "/snapshot")
+            .then()
+            .statusCode(400)
+            .body("error", equalTo("validation_failed"));
+}
+
 }

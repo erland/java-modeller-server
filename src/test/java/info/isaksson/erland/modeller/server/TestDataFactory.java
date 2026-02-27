@@ -57,7 +57,35 @@ public class TestDataFactory {
         return ds.id;
     }
 
-    @Transactional
+    
+
+@Transactional
+public UUID createDatasetVisibleTo(String userSub, ValidationPolicy policy) {
+    OffsetDateTime now = OffsetDateTime.now();
+
+    DatasetEntity ds = new DatasetEntity();
+    ds.id = UUID.randomUUID();
+    ds.name = "Test dataset";
+    ds.description = null;
+    ds.createdAt = now;
+    ds.updatedAt = now;
+    ds.archivedAt = null;
+    ds.deletedAt = null;
+    ds.createdBy = userSub;
+    ds.updatedBy = userSub;
+    ds.currentRevision = 0;
+    ds.validationPolicy = policy == null ? ValidationPolicy.NONE : policy;
+    datasetRepository.persist(ds);
+
+    DatasetAclEntity acl = new DatasetAclEntity();
+    acl.id = new DatasetAclId(ds.id, userSub);
+    acl.role = "OWNER";
+    acl.createdAt = now;
+    aclRepository.persist(acl);
+
+    return ds.id;
+}
+@Transactional
     public void grantAcl(UUID datasetId, String userSub, String role) {
         OffsetDateTime now = OffsetDateTime.now();
         DatasetAclEntity acl = new DatasetAclEntity();
