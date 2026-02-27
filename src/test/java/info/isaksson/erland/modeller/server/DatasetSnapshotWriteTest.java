@@ -164,5 +164,30 @@ public void put_snapshot_requires_lease_token_when_active_lease_held_by_caller()
             .then()
             .statusCode(200)
             .body("revision", equalTo(1));
+
+
 }
+
+    @Test
+    @TestSecurity(user = "alice")
+    public void owner_force_override_can_write_while_leased_by_other_user() throws Exception {
+        UUID datasetId = data.createDatasetVisibleTo("alice");
+        data.grantAcl(datasetId, "bob", "EDITOR");
+        // Bob holds an active lease
+        data.createLeaseWithToken(datasetId, "bob", 300);
+
+        ObjectNode payload = objectMapper.createObjectNode()
+                .put("schemaVersion", 1)
+                .set("model", objectMapper.createObjectNode().put("k", "v"));
+
+        given()
+                .header("If-Match", "\"0\"")
+                .contentType("application/json")
+                .body(payload.toString())
+        .when()
+                .put("/datasets/" + datasetId + "/snapshot?force=true")
+        .then()
+                .statusCode(200)
+                .body("revision", equalTo(1));
+    }
 }

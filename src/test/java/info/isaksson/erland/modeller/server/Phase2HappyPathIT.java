@@ -128,6 +128,8 @@ public class Phase2HappyPathIT {
 
         // 8) Restore snapshot revision 1 -> creates new latest revision 3 (If-Match current "2")
         given()
+                .contentType(ContentType.JSON)
+                .body("{}")
                 .header("If-Match", "\"2\"")
                 .header("X-Lease-Token", refreshedToken)
         .when()

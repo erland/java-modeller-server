@@ -19,6 +19,7 @@ import info.isaksson.erland.modeller.server.api.dto.LeaseConflictResponse;
 import info.isaksson.erland.modeller.server.api.dto.SnapshotConflictResponse;
 import info.isaksson.erland.modeller.server.api.dto.SnapshotResponse;
 import info.isaksson.erland.modeller.server.api.dto.ValidationErrorDto;
+import info.isaksson.erland.modeller.server.api.dto.RestoreSnapshotRequest;
 import info.isaksson.erland.modeller.server.api.error.ApiError;
 import info.isaksson.erland.modeller.server.validation.SnapshotValidationService;
 import info.isaksson.erland.modeller.server.validation.ValidationResult;
@@ -32,6 +33,7 @@ import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.HeaderParam;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.core.MediaType;
@@ -145,7 +147,9 @@ public class DatasetSnapshotHistoryResource {
     public Response restore(@PathParam("datasetId") UUID datasetId,
                             @PathParam("revision") long revision,
                             @HeaderParam("If-Match") String ifMatch,
-                            @HeaderParam("X-Lease-Token") String leaseToken) {
+                            @HeaderParam("X-Lease-Token") String leaseToken,
+                            @QueryParam("force") @DefaultValue("false") boolean force,
+                            RestoreSnapshotRequest request) {
         PrincipalInfo principal = authz.currentPrincipal();
 
         Role role = aclRepository.findRole(datasetId, principal.subject())
@@ -170,19 +174,30 @@ public class DatasetSnapshotHistoryResource {
         }
         String expected = normalizeIfMatch(ifMatch);
 
+        boolean requestContextForceOverride = false;
+        String requestContextForcedLeaseHolder = null;
+
         // Lease enforcement (same rules as snapshot writes)
         OffsetDateTime nowLeaseCheck = OffsetDateTime.now();
         java.util.Optional<DatasetLeaseEntity> activeLeaseOpt = leaseRepository.findActive(datasetId, nowLeaseCheck);
         if (activeLeaseOpt.isPresent()) {
             DatasetLeaseEntity activeLease = activeLeaseOpt.get();
             if (!principal.subject().equals(activeLease.holderSub)) {
-                LeaseConflictResponse conflict = new LeaseConflictResponse(datasetId, activeLease.holderSub, activeLease.expiresAt);
-                return Response.status(Response.Status.CONFLICT)
-                        .type(MediaType.APPLICATION_JSON)
-                        .entity(conflict)
-                        .build();
+                if (force) {
+                    if (!role.atLeast(Role.OWNER)) {
+                        throw new jakarta.ws.rs.ForbiddenException("Insufficient role for dataset");
+                    }
+                    requestContextForceOverride = true;
+                    requestContextForcedLeaseHolder = activeLease.holderSub;
+                } else {
+                    LeaseConflictResponse conflict = new LeaseConflictResponse(datasetId, activeLease.holderSub, activeLease.expiresAt);
+                    return Response.status(Response.Status.CONFLICT)
+                            .type(MediaType.APPLICATION_JSON)
+                            .entity(conflict)
+                            .build();
+                }
             }
-            if (leaseToken == null || leaseToken.isBlank() || !leaseToken.trim().equals(activeLease.leaseToken)) {
+            if (principal.subject().equals(activeLease.holderSub) && (leaseToken == null || leaseToken.isBlank() || !leaseToken.trim().equals(activeLease.leaseToken))) {
                 String path = uriInfo != null && uriInfo.getPath() != null ? "/" + uriInfo.getPath() : null;
                 String requestId = (String) MDC.get("requestId");
                 ApiError err = new ApiError(
@@ -293,12 +308,21 @@ public class DatasetSnapshotHistoryResource {
         audit.actorSub = principal.subject();
         audit.action = "SNAPSHOT_RESTORE";
         audit.createdAt = now;
-        audit.detailsJson = objectMapper.createObjectNode()
+        com.fasterxml.jackson.databind.node.ObjectNode auditDetails = objectMapper.createObjectNode()
                 .put("restoredFromRevision", revision)
                 .put("previousRevision", currentRevision)
                 .put("newRevision", newRevision)
-                .put("etag", newEtag)
-                .toString();
+                .put("etag", newEtag);
+        if (request != null && request.message != null && !request.message.isBlank()) {
+            auditDetails.put("message", request.message.trim());
+        }
+        if (requestContextForceOverride) {
+            auditDetails.put("forced", true);
+            if (requestContextForcedLeaseHolder != null) {
+                auditDetails.put("overrodeLeaseHolderSub", requestContextForcedLeaseHolder);
+            }
+        }
+        audit.detailsJson = auditDetails.toString();
         auditRepository.persist(audit);
 
         // Also record the restored state into history so the timeline remains linear.
@@ -314,7 +338,10 @@ public class DatasetSnapshotHistoryResource {
             String payloadJson = source.payloadJson;
             hist.payloadBytes = payloadJson == null ? 0 : payloadJson.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
             hist.savedAction = "RESTORE";
-            hist.savedMessage = "Restored from revision " + revision;
+            String restoreMsg = (request != null && request.message != null && !request.message.isBlank())
+                    ? request.message.trim()
+                    : ("Restored from revision " + revision);
+            hist.savedMessage = restoreMsg;
             historyRepository.persist(hist);
             historyRepository.pruneKeepLatest(datasetId, snapshotHistoryKeep);
             historyRepository.pruneByMaxAgeDays(datasetId, snapshotHistoryMaxAgeDays);

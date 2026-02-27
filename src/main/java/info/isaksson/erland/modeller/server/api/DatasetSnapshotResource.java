@@ -37,6 +37,8 @@ import jakarta.ws.rs.core.EntityTag;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
+import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.DefaultValue;
 import jakarta.transaction.Transactional;
 
 import java.time.OffsetDateTime;
@@ -178,6 +180,7 @@ public class DatasetSnapshotResource {
     public Response putLatest(@PathParam("datasetId") UUID datasetId,
                           @HeaderParam("If-Match") String ifMatch,
                           @HeaderParam("X-Lease-Token") String leaseToken,
+                          @QueryParam("force") @DefaultValue("false") boolean force,
                           JsonNode payload) {
     PrincipalInfo principal = authz.currentPrincipal();
 
@@ -206,6 +209,9 @@ public class DatasetSnapshotResource {
 
     String expected = normalizeIfMatch(ifMatch);
 
+    boolean requestContextForceOverride = false;
+    String requestContextForcedLeaseHolder = null;
+
 // Phase 2: enforce dataset leases (soft locks). Leases complement revision checks.
 // - If an active lease exists and is held by someone else -> 409 LeaseConflictResponse
 // - If an active lease exists and is held by caller -> require matching X-Lease-Token
@@ -213,30 +219,52 @@ OffsetDateTime nowLeaseCheck = OffsetDateTime.now();
 java.util.Optional<DatasetLeaseEntity> activeLeaseOpt = leaseRepository.findActive(datasetId, nowLeaseCheck);
 if (activeLeaseOpt.isPresent()) {
     DatasetLeaseEntity activeLease = activeLeaseOpt.get();
+
+    boolean forced = false;
+    String forcedLeaseHolder = null;
+
     if (!principal.subject().equals(activeLease.holderSub)) {
-        LeaseConflictResponse conflict = new LeaseConflictResponse(datasetId, activeLease.holderSub, activeLease.expiresAt);
-        return Response.status(Response.Status.CONFLICT)
-                .type(MediaType.APPLICATION_JSON)
-                .entity(conflict)
-                .build();
+        if (force) {
+            // Owner override: allow bypassing a lease held by someone else.
+            if (!role.atLeast(Role.OWNER)) {
+                throw new jakarta.ws.rs.ForbiddenException("Insufficient role for dataset");
+            }
+            forced = true;
+            forcedLeaseHolder = activeLease.holderSub;
+        } else {
+            LeaseConflictResponse conflict = new LeaseConflictResponse(datasetId, activeLease.holderSub, activeLease.expiresAt);
+            return Response.status(Response.Status.CONFLICT)
+                    .type(MediaType.APPLICATION_JSON)
+                    .entity(conflict)
+                    .build();
+        }
+    } else {
+        // Caller is the lease holder: require a matching lease token.
+        if (leaseToken == null || leaseToken.isBlank() || !leaseToken.trim().equals(activeLease.leaseToken)) {
+            String path = uriInfo != null && uriInfo.getPath() != null ? "/" + uriInfo.getPath() : null;
+            String requestId = (String) MDC.get("requestId");
+            ApiError err = new ApiError(
+                    OffsetDateTime.now(),
+                    428,
+                    "LEASE_TOKEN_REQUIRED",
+                    "Missing or invalid X-Lease-Token for active lease",
+                    path,
+                    requestId
+            );
+            return Response.status(428)
+                    .type(MediaType.APPLICATION_JSON)
+                    .entity(err)
+                    .build();
+        }
     }
-    if (leaseToken == null || leaseToken.isBlank() || !leaseToken.trim().equals(activeLease.leaseToken)) {
-        String path = uriInfo != null && uriInfo.getPath() != null ? "/" + uriInfo.getPath() : null;
-        String requestId = (String) MDC.get("requestId");
-        ApiError err = new ApiError(
-                OffsetDateTime.now(),
-                428,
-                "LEASE_TOKEN_REQUIRED",
-                "Missing or invalid X-Lease-Token for active lease",
-                path,
-                requestId
-        );
-        return Response.status(428)
-                .type(MediaType.APPLICATION_JSON)
-                .entity(err)
-                .build();
+
+    // Stash forced override details for later audit (if used)
+    if (forced) {
+        requestContextForceOverride = true;
+        requestContextForcedLeaseHolder = forcedLeaseHolder;
     }
 }
+
 
 
     DatasetSnapshotLatestEntity latest = snapshotRepository.findById(datasetId);
@@ -343,11 +371,17 @@ if (activeLeaseOpt.isPresent()) {
     audit.actorSub = principal.subject();
     audit.action = "SNAPSHOT_SAVE";
     audit.createdAt = now;
-    audit.detailsJson = objectMapper.createObjectNode()
+    com.fasterxml.jackson.databind.node.ObjectNode auditDetails = objectMapper.createObjectNode()
             .put("previousRevision", currentRevision)
             .put("newRevision", newRevision)
-            .put("etag", newEtag)
-            .toString();
+            .put("etag", newEtag);
+    if (requestContextForceOverride) {
+        auditDetails.put("forced", true);
+        if (requestContextForcedLeaseHolder != null) {
+            auditDetails.put("overrodeLeaseHolderSub", requestContextForcedLeaseHolder);
+        }
+    }
+    audit.detailsJson = auditDetails.toString();
     auditRepository.persist(audit);
 
     // Optional history: store prior snapshots and prune to keep latest N
