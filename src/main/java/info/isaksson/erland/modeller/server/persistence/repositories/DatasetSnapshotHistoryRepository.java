@@ -29,16 +29,29 @@ public class DatasetSnapshotHistoryRepository implements PanacheRepositoryBase<D
         if (keep <= 0) {
             return;
         }
-        List<Long> keepRevs = getEntityManager()
-                .createQuery("select h.revision from DatasetSnapshotHistoryEntity h where h.datasetId = :id order by h.revision desc", Long.class)
-                .setParameter("id", datasetId)
-                .setMaxResults(keep)
-                .getResultList();
+        // Single-statement prune to avoid pulling all revisions into memory
+        getEntityManager().createNativeQuery(
+                "DELETE FROM dataset_snapshot_history h " +
+                "WHERE h.dataset_id = :id AND h.revision NOT IN (" +
+                "  SELECT revision FROM dataset_snapshot_history WHERE dataset_id = :id ORDER BY revision DESC LIMIT :keep" +
+                ")"
+        )
+        .setParameter("id", datasetId)
+        .setParameter("keep", keep)
+        .executeUpdate();
+    }
 
-        if (keepRevs == null || keepRevs.isEmpty()) {
+    public void pruneByMaxAgeDays(UUID datasetId, int maxAgeDays) {
+        if (maxAgeDays <= 0) {
             return;
         }
-
-        delete("datasetId = ?1 AND revision NOT IN ?2", datasetId, keepRevs);
+        getEntityManager().createNativeQuery(
+                "DELETE FROM dataset_snapshot_history " +
+                "WHERE dataset_id = :id AND saved_at < (NOW() - (:days || ' days')::interval)"
+        )
+        .setParameter("id", datasetId)
+        .setParameter("days", maxAgeDays)
+        .executeUpdate();
     }
+
 }

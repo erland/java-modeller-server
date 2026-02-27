@@ -71,6 +71,9 @@ public class DatasetSnapshotHistoryResource {
     @ConfigProperty(name = "modeller.snapshot.history.keep", defaultValue = "0")
     int snapshotHistoryKeep;
 
+    @ConfigProperty(name = "modeller.snapshot.history.maxAgeDays", defaultValue = "0")
+    int snapshotHistoryMaxAgeDays;
+
     @Context UriInfo uriInfo;
 
     public static class SnapshotHistoryItem {
@@ -308,8 +311,13 @@ public class DatasetSnapshotHistoryResource {
             hist.schemaVersion = schemaVersion;
             hist.savedAt = now;
             hist.savedBy = principal.subject();
+                    String payloadJson = source.payloadJson;
+            hist.payloadBytes = payloadJson == null ? 0 : payloadJson.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+        hist.savedAction = "RESTORE";
+        hist.savedMessage = "Restored from revision " + revision;
             historyRepository.persist(hist);
             historyRepository.pruneKeepLatest(datasetId, snapshotHistoryKeep);
+        historyRepository.pruneByMaxAgeDays(datasetId, snapshotHistoryMaxAgeDays);
         }
 
         SnapshotResponse body = new SnapshotResponse(

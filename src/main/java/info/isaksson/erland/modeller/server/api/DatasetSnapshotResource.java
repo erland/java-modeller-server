@@ -68,6 +68,9 @@ public class DatasetSnapshotResource {
 
     @ConfigProperty(name = "modeller.snapshot.history.keep", defaultValue = "20")
     int snapshotHistoryKeep;
+
+    @ConfigProperty(name = "modeller.snapshot.history.maxAgeDays", defaultValue = "0")
+    int snapshotHistoryMaxAgeDays;
     private final DatasetAuditRepository auditRepository;
     private final DatasetAuthorizationService authz;
     private final ObjectMapper objectMapper;
@@ -357,8 +360,12 @@ if (activeLeaseOpt.isPresent()) {
         hist.schemaVersion = schemaVersion;
         hist.savedAt = now;
         hist.savedBy = principal.subject();
+        hist.payloadBytes = payloadJson == null ? 0 : payloadJson.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+        hist.savedAction = "WRITE";
+        hist.savedMessage = null;
         historyRepository.persist(hist);
         historyRepository.pruneKeepLatest(datasetId, snapshotHistoryKeep);
+        historyRepository.pruneByMaxAgeDays(datasetId, snapshotHistoryMaxAgeDays);
     }
 SnapshotResponse body = new SnapshotResponse(
             datasetId,

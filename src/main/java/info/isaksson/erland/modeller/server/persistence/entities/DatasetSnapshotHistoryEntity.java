@@ -40,4 +40,15 @@ public class DatasetSnapshotHistoryEntity {
 
     @Column(name = "saved_by")
     public String savedBy;
+
+
+    @Column(name = "payload_bytes", nullable = false)
+    public int payloadBytes;
+
+    @Column(name = "saved_action", nullable = false)
+    public String savedAction;
+
+    @Column(name = "saved_message")
+    public String savedMessage;
+
 }
