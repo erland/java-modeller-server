@@ -11,6 +11,10 @@ import java.util.UUID;
 @ApplicationScoped
 public class DatasetSnapshotHistoryRepository implements PanacheRepositoryBase<DatasetSnapshotHistoryEntity, DatasetSnapshotHistoryId> {
 
+    public java.util.Optional<DatasetSnapshotHistoryEntity> findByDatasetAndRevision(UUID datasetId, long revision) {
+        return find("datasetId = ?1 AND revision = ?2", datasetId, revision).firstResultOptional();
+    }
+
     public List<DatasetSnapshotHistoryEntity> listForDataset(UUID datasetId, int limit, int offset) {
         int safeLimit = Math.max(1, Math.min(limit, 200));
         int safeOffset = Math.max(0, offset);
