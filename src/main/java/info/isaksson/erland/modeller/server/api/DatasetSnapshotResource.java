@@ -15,6 +15,9 @@ import info.isaksson.erland.modeller.server.persistence.repositories.DatasetAclR
 import info.isaksson.erland.modeller.server.persistence.repositories.DatasetAuditRepository;
 import info.isaksson.erland.modeller.server.persistence.repositories.DatasetRepository;
 import info.isaksson.erland.modeller.server.persistence.repositories.DatasetSnapshotLatestRepository;
+import info.isaksson.erland.modeller.server.persistence.repositories.DatasetLeaseRepository;
+import info.isaksson.erland.modeller.server.persistence.entities.DatasetLeaseEntity;
+import info.isaksson.erland.modeller.server.api.dto.LeaseConflictResponse;
 import info.isaksson.erland.modeller.server.security.DatasetAuthorizationService;
 import info.isaksson.erland.modeller.server.security.PrincipalInfo;
 import info.isaksson.erland.modeller.server.domain.ValidationPolicy;
@@ -58,6 +61,7 @@ public class DatasetSnapshotResource {
     private final DatasetRepository datasetRepository;
     private final DatasetAclRepository aclRepository;
     private final DatasetSnapshotLatestRepository snapshotRepository;
+    private final DatasetLeaseRepository leaseRepository;
 
     @jakarta.inject.Inject
     DatasetSnapshotHistoryRepository historyRepository;
@@ -75,12 +79,14 @@ public class DatasetSnapshotResource {
     public DatasetSnapshotResource(DatasetRepository datasetRepository,
                                   DatasetAclRepository aclRepository,
                                   DatasetSnapshotLatestRepository snapshotRepository,
+                                  DatasetLeaseRepository leaseRepository,
                                   DatasetAuditRepository auditRepository,
                                   DatasetAuthorizationService authz,
                                   ObjectMapper objectMapper) {
         this.datasetRepository = datasetRepository;
         this.aclRepository = aclRepository;
         this.snapshotRepository = snapshotRepository;
+        this.leaseRepository = leaseRepository;
         this.auditRepository = auditRepository;
         this.authz = authz;
         this.objectMapper = objectMapper;
@@ -168,6 +174,7 @@ public class DatasetSnapshotResource {
     @Transactional
     public Response putLatest(@PathParam("datasetId") UUID datasetId,
                           @HeaderParam("If-Match") String ifMatch,
+                          @HeaderParam("X-Lease-Token") String leaseToken,
                           JsonNode payload) {
     PrincipalInfo principal = authz.currentPrincipal();
 
@@ -195,6 +202,39 @@ public class DatasetSnapshotResource {
     }
 
     String expected = normalizeIfMatch(ifMatch);
+
+// Phase 2: enforce dataset leases (soft locks). Leases complement revision checks.
+// - If an active lease exists and is held by someone else -> 409 LeaseConflictResponse
+// - If an active lease exists and is held by caller -> require matching X-Lease-Token
+OffsetDateTime nowLeaseCheck = OffsetDateTime.now();
+java.util.Optional<DatasetLeaseEntity> activeLeaseOpt = leaseRepository.findActive(datasetId, nowLeaseCheck);
+if (activeLeaseOpt.isPresent()) {
+    DatasetLeaseEntity activeLease = activeLeaseOpt.get();
+    if (!principal.subject().equals(activeLease.holderSub)) {
+        LeaseConflictResponse conflict = new LeaseConflictResponse(datasetId, activeLease.holderSub, activeLease.expiresAt);
+        return Response.status(Response.Status.CONFLICT)
+                .type(MediaType.APPLICATION_JSON)
+                .entity(conflict)
+                .build();
+    }
+    if (leaseToken == null || leaseToken.isBlank() || !leaseToken.trim().equals(activeLease.leaseToken)) {
+        String path = uriInfo != null && uriInfo.getPath() != null ? "/" + uriInfo.getPath() : null;
+        String requestId = (String) MDC.get("requestId");
+        ApiError err = new ApiError(
+                OffsetDateTime.now(),
+                428,
+                "LEASE_TOKEN_REQUIRED",
+                "Missing or invalid X-Lease-Token for active lease",
+                path,
+                requestId
+        );
+        return Response.status(428)
+                .type(MediaType.APPLICATION_JSON)
+                .entity(err)
+                .build();
+    }
+}
+
 
     DatasetSnapshotLatestEntity latest = snapshotRepository.findById(datasetId);
     String currentEtag = latest == null ? "0" : (latest.etag != null ? latest.etag : String.valueOf(latest.revision));

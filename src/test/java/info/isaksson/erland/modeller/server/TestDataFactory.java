@@ -115,7 +115,7 @@ public UUID createDatasetVisibleTo(String userSub, ValidationPolicy policy) {
 
     
     @Transactional
-    public void createLease(UUID datasetId, String holderSub, long ttlSeconds) {
+    public String createLeaseWithToken(UUID datasetId, String holderSub, long ttlSeconds) {
         OffsetDateTime now = OffsetDateTime.now();
         DatasetLeaseEntity e = new DatasetLeaseEntity();
         e.datasetId = datasetId;
@@ -125,7 +125,15 @@ public UUID createDatasetVisibleTo(String userSub, ValidationPolicy policy) {
         e.renewedAt = now;
         e.expiresAt = now.plusSeconds(ttlSeconds);
         leaseRepository.persist(e);
+        return e.leaseToken;
     }
+
+
+
+@Transactional
+public void createLease(UUID datasetId, String holderSub, long ttlSeconds) {
+    createLeaseWithToken(datasetId, holderSub, ttlSeconds);
+}
 
 @Transactional
     public long countAudit(UUID datasetId, String action) {

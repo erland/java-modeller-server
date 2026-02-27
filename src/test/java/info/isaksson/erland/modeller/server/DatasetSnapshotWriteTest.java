@@ -112,4 +112,57 @@ public void put_snapshot_rejects_missing_schema_version_when_policy_basic() {
             .body("validationErrors[0].severity", equalTo("ERROR"));
 }
 
+@Test
+@TestSecurity(user = "alice")
+public void put_snapshot_rejects_write_when_dataset_leased_by_other_user() {
+    UUID datasetId = data.createDatasetVisibleTo("alice");
+    // Active lease held by bob
+    data.createLease(datasetId, "bob", 600);
+
+    ObjectNode payload = objectMapper.createObjectNode()
+            .put("schemaVersion", 1)
+            .set("model", objectMapper.createObjectNode());
+
+    given()
+            .header("If-Match", "\"0\"")
+            .contentType("application/json")
+            .body(payload.toString())
+            .when().put("/datasets/" + datasetId + "/snapshot")
+            .then()
+            .statusCode(409)
+            .body("datasetId", equalTo(datasetId.toString()))
+            .body("holderSub", equalTo("bob"));
+}
+
+@Test
+@TestSecurity(user = "alice")
+public void put_snapshot_requires_lease_token_when_active_lease_held_by_caller() {
+    UUID datasetId = data.createDatasetVisibleTo("alice");
+    String token = data.createLeaseWithToken(datasetId, "alice", 600);
+
+    ObjectNode payload = objectMapper.createObjectNode()
+            .put("schemaVersion", 1)
+            .set("model", objectMapper.createObjectNode());
+
+    // Missing token -> 428
+    given()
+            .header("If-Match", "\"0\"")
+            .contentType("application/json")
+            .body(payload.toString())
+            .when().put("/datasets/" + datasetId + "/snapshot")
+            .then()
+            .statusCode(428)
+            .body("code", equalTo("LEASE_TOKEN_REQUIRED"));
+
+    // Correct token -> 200
+    given()
+            .header("If-Match", "\"0\"")
+            .header("X-Lease-Token", token)
+            .contentType("application/json")
+            .body(payload.toString())
+            .when().put("/datasets/" + datasetId + "/snapshot")
+            .then()
+            .statusCode(200)
+            .body("revision", equalTo(1));
+}
 }
