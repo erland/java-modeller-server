@@ -241,19 +241,21 @@ if (activeLeaseOpt.isPresent()) {
     long currentRevision = latest == null ? 0L : latest.revision;
 
     if (!expected.equals(currentEtag)) {
-        // Conflict: include current revision and best-effort who/when
-        String savedBy = auditRepository.findLatestActorForDatasetAndAction(datasetId, "SNAPSHOT_SAVE").orElse(null);
-        OffsetDateTime savedAt = latest == null ? null : latest.updatedAt;
+        // Phase 2: enriched conflict response for clients.
+        // Include deterministic current revision + ETag + who/when last updated.
+        String updatedBy = auditRepository.findLatestActorForDatasetAndAction(datasetId, "SNAPSHOT_SAVE").orElse(null);
+        OffsetDateTime updatedAt = latest == null ? null : latest.updatedAt;
 
         SnapshotConflictResponse conflict = new SnapshotConflictResponse(
                 datasetId,
                 currentRevision,
                 currentEtag,
-                savedAt,
-                savedBy
+                updatedAt,
+                updatedBy
         );
 
         return Response.status(Response.Status.CONFLICT)
+                .type(MediaType.APPLICATION_JSON)
                 .tag(new EntityTag(currentEtag))
                 .entity(conflict)
                 .build();

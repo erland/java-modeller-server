@@ -10,16 +10,34 @@ public class SnapshotConflictResponse {
     public UUID datasetId;
     public long currentRevision;
     public String currentEtag;
+    /**
+     * Backwards-compatible fields (Phase 1 / early Phase 2).
+     * Prefer updatedAt/updatedBy going forward.
+     */
     public OffsetDateTime savedAt;
     public String savedBy;
 
+    /**
+     * Phase 2: deterministic "last updated" fields for conflict UX.
+     */
+    public OffsetDateTime updatedAt;
+    public String updatedBy;
+
     public SnapshotConflictResponse() {}
 
-    public SnapshotConflictResponse(UUID datasetId, long currentRevision, String currentEtag, OffsetDateTime savedAt, String savedBy) {
+    public SnapshotConflictResponse(UUID datasetId,
+                                  long currentRevision,
+                                  String currentEtag,
+                                  OffsetDateTime updatedAt,
+                                  String updatedBy) {
         this.datasetId = datasetId;
         this.currentRevision = currentRevision;
         this.currentEtag = currentEtag;
-        this.savedAt = savedAt;
-        this.savedBy = savedBy;
+        // Keep legacy names populated for existing clients
+        this.savedAt = updatedAt;
+        this.savedBy = updatedBy;
+        // New deterministic names
+        this.updatedAt = updatedAt;
+        this.updatedBy = updatedBy;
     }
 }
