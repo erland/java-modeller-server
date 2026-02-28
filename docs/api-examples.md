@@ -586,3 +586,146 @@ Authorization: Bearer <token>
   ]
 }
 ```
+
+
+---
+
+# Phase 3 — Operations + real-time stream
+
+## 10) Append operations (`POST /datasets/{datasetId}/ops`)
+
+Append one or more operations to a dataset. The request is **optimistically concurrent** using `baseRevision`.
+If Phase 2 leases are enabled and a lease exists, the request may require `X-Lease-Token` (see below).
+
+**Request**
+```http
+POST /datasets/d_9b7d3f0f-9b0a-4c9c-9de2-1b9a8b0f5c21/ops?force=false HTTP/1.1
+Authorization: Bearer <token>
+Content-Type: application/json
+X-Lease-Token: <token-if-required>
+```
+
+```json
+{
+  "baseRevision": 12,
+  "operations": [
+    {
+      "opId": "c7b4b2f4-3c31-4f93-8f9a-2f9c8c8a1c11",
+      "type": "JSON_PATCH",
+      "payload": [
+        { "op": "add", "path": "/elements/0", "value": { "id": "A", "type": "ApplicationComponent" } }
+      ]
+    }
+  ]
+}
+```
+
+**Response (200)**
+```json
+{
+  "newRevision": 13,
+  "acceptedOperations": [
+    {
+      "opId": "c7b4b2f4-3c31-4f93-8f9a-2f9c8c8a1c11",
+      "type": "JSON_PATCH",
+      "payload": [
+        { "op": "add", "path": "/elements/0", "value": { "id": "A", "type": "ApplicationComponent" } }
+      ]
+    }
+  ]
+}
+```
+
+**Response (409 REVISION_CONFLICT)**
+```json
+{
+  "datasetId": "d_9b7d3f0f-9b0a-4c9c-9de2-1b9a8b0f5c21",
+  "baseRevision": 12,
+  "currentRevision": 15
+}
+```
+
+**Response (409 DUPLICATE_OP_ID)**
+```json
+{
+  "datasetId": "d_9b7d3f0f-9b0a-4c9c-9de2-1b9a8b0f5c21",
+  "opId": "c7b4b2f4-3c31-4f93-8f9a-2f9c8c8a1c11",
+  "existingRevision": 13
+}
+```
+
+**Response (409 LEASE_CONFLICT)**
+```json
+{
+  "code": "LEASE_CONFLICT",
+  "message": "Dataset is leased by another user.",
+  "details": {
+    "datasetId": "d_9b7d3f0f-9b0a-4c9c-9de2-1b9a8b0f5c21",
+    "leaseHolderSub": "user-123",
+    "leaseExpiresAt": "2026-02-28T20:15:00Z"
+  }
+}
+```
+
+**Response (428 LEASE_TOKEN_REQUIRED)**
+```json
+{
+  "code": "LEASE_TOKEN_REQUIRED",
+  "errorCode": "LEASE_TOKEN_REQUIRED",
+  "message": "Lease token is required.",
+  "details": {
+    "datasetId": "d_9b7d3f0f-9b0a-4c9c-9de2-1b9a8b0f5c21"
+  }
+}
+```
+
+---
+
+## 11) Read ops since revision (`GET /datasets/{datasetId}/ops?fromRevision=...`)
+
+Read operations strictly **after** `fromRevision`, ordered by revision.
+
+**Request**
+```http
+GET /datasets/d_9b7d3f0f-9b0a-4c9c-9de2-1b9a8b0f5c21/ops?fromRevision=12&limit=100 HTTP/1.1
+Authorization: Bearer <token>
+```
+
+**Response (200)**
+```json
+{
+  "fromRevision": 12,
+  "toRevision": 15,
+  "operations": [
+    { "datasetId": "d_...", "revision": 13, "opId": "op-1", "type": "JSON_PATCH", "payload": [ ... ],
+      "createdAt": "2026-02-28T20:00:00Z", "createdBy": "user-123" },
+    { "datasetId": "d_...", "revision": 14, "opId": "op-2", "type": "JSON_PATCH", "payload": [ ... ],
+      "createdAt": "2026-02-28T20:01:00Z", "createdBy": "user-123" }
+  ]
+}
+```
+
+---
+
+## 12) Subscribe to ops stream (`GET /datasets/{datasetId}/ops/stream`)
+
+Server-Sent Events (SSE) stream of `OperationEvent`s.
+
+- If `fromRevision` is supplied, the server sends a backlog (`revision > fromRevision`, up to `limit`) and then continues live.
+- If omitted, the stream starts live from “now”.
+
+**Request**
+```http
+GET /datasets/d_9b7d3f0f-9b0a-4c9c-9de2-1b9a8b0f5c21/ops/stream?fromRevision=12&limit=100 HTTP/1.1
+Authorization: Bearer <token>
+Accept: text/event-stream
+```
+
+**Response (200, SSE)**
+```text
+event: operation
+data: {"datasetId":"d_...","revision":13,"opId":"op-1","type":"JSON_PATCH","payload":[...],"createdAt":"...","createdBy":"user-123"}
+
+event: operation
+data: {"datasetId":"d_...","revision":14,"opId":"op-2","type":"JSON_PATCH","payload":[...],"createdAt":"...","createdBy":"user-123"}
+```

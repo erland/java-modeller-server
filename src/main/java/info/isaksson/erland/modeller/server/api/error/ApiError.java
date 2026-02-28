@@ -11,6 +11,11 @@ public class ApiError {
     public OffsetDateTime timestamp;
     public int status;
     public String code;
+    /**
+     * Alias for {@link #code}. Newer clients expect 'errorCode'.
+     * Both fields are kept for backwards compatibility.
+     */
+    public String errorCode;
     public String message;
     public String path;
     public String requestId;
@@ -28,6 +33,7 @@ public class ApiError {
         this.timestamp = timestamp;
         this.status = status;
         this.code = code;
+        this.errorCode = code;
         this.message = message;
         this.path = path;
         this.requestId = requestId;

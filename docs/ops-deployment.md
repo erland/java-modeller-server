@@ -47,3 +47,18 @@ If you run multiple instances (replicas):
 - Health: `/q/health`
 - OpenAPI: `/q/openapi`
 - Swagger UI: `/q/swagger-ui`
+
+
+## Server-Sent Events (SSE) considerations
+
+When deploying behind a reverse proxy (e.g., Nginx), ensure SSE connections are not buffered and are allowed to stay open.
+
+### Nginx hints
+- Disable proxy buffering for the SSE location:
+  - `proxy_buffering off;`
+- Increase timeouts for long-lived connections:
+  - `proxy_read_timeout 3600s;`
+  - `proxy_send_timeout 3600s;`
+- Preserve `Connection` headers as needed by your setup.
+
+Clients should always recover using `GET /datasets/{datasetId}/ops?fromRevision=...` after reconnect.

@@ -23,6 +23,7 @@ Docs bundle:
 - `docs/phase1-step-by-step-plan-A.md`
 - `docs/api-examples.md`
 - `docs/ops-deployment.md`
+- `docs/phase3-e2e-demo.md` (Phase 3 ops + SSE walkthrough)
 
 ## Environments at a glance
 

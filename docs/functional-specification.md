@@ -436,3 +436,40 @@ Conflict errors MUST include:
 - Real-time subscribers receive updates in order.
 - Multiple editors can work concurrently with minimal disruption.
 - Server enforces permissions and validation for operations.
+
+
+---
+
+## 6.3 Operation log and real-time sync
+
+### Goals
+Enable near real-time multi-user collaboration by allowing clients to submit **operations** against a dataset and to subscribe to a **stream** of accepted operations.
+
+### Concepts
+- **Revision**: monotonically increasing integer assigned by the server per dataset.
+- **Operation**: a client-generated change command with a stable `opId` (idempotency key), a `type`, and a JSON `payload`.
+- **Materialized state**: the server’s latest snapshot derived by applying accepted operations in order.
+
+### Required behaviors
+1. **Append operations**
+   - Client submits one or more operations referencing a `baseRevision`.
+   - Server MUST reject if `baseRevision` does not match current revision (conflict).
+   - Server MUST ensure idempotency using `opId` (duplicate opId rejected or treated as already applied).
+   - Server MUST assign revisions in strict order and persist an append-only log.
+   - Server MUST materialize and persist updated latest snapshot for backwards compatibility with snapshot readers.
+
+2. **Read operations since revision**
+   - Client can request operations strictly after a given revision (pagination supported by `limit`).
+   - Returned operations must be ordered by revision.
+
+3. **Real-time subscription**
+   - Client can subscribe to server-sent events (or equivalent) for a dataset.
+   - Streamed events must be in revision order.
+   - Delivery is best-effort; clients recover by re-reading from last known revision.
+
+4. **Authorization + leases**
+   - All operation endpoints MUST enforce dataset ACL roles.
+   - If leases are enabled, operation appends MUST follow the same conflict policy as snapshot writes.
+
+### Compatibility
+- Snapshot-based clients remain supported: the server continues to expose the latest snapshot and revision/ETag.
