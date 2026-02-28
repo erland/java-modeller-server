@@ -6,7 +6,7 @@ WORKDIR /project
 # Cache deps first
 COPY pom.xml mvnw ./
 COPY .mvn .mvn
-RUN chmod +x mvnw && ./mvnw -q -DskipTests dependency:go-offline
+RUN chmod +x mvnw && ./mvnw -DskipTests dependency:go-offline
 
 # Build
 COPY src src
