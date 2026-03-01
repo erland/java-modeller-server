@@ -17,6 +17,7 @@ import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.jboss.resteasy.reactive.RestStreamElementType;
+import io.smallrye.common.annotation.Blocking;
 
 import java.util.UUID;
 
@@ -55,6 +56,7 @@ public class DatasetOpsResource {
     @Path("stream")
     @Produces(MediaType.SERVER_SENT_EVENTS)
     @RestStreamElementType(MediaType.APPLICATION_JSON)
+    @Blocking
     public Multi<OperationEvent> stream(@PathParam("datasetId") UUID datasetId,
                            @QueryParam("fromRevision") Long fromRevision,
                            @QueryParam("limit") Integer limit) {

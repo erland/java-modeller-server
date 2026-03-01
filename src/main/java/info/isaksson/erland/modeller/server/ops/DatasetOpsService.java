@@ -177,14 +177,14 @@ public class DatasetOpsService {
             } else {
                 // Caller is lease holder: token required.
                 if (leaseToken == null || leaseToken.isBlank() || !leaseToken.trim().equals(activeLease.leaseToken)) {
-                    String requestId = (String) MDC.get("requestId");
+                    String mdcRequestId = (String) MDC.get("mdcRequestId");
                     ApiError err = new ApiError(
                             OffsetDateTime.now(),
                             428,
                             "LEASE_TOKEN_REQUIRED",
                             "Missing or invalid X-Lease-Token for active lease",
                             null,
-                            requestId
+                            mdcRequestId
                     );
                     return Response.status(428).entity(err).build();
                 }
@@ -241,14 +241,14 @@ public class DatasetOpsService {
         String payloadJson = nextSnapshot.toString();
         ValidationResult vr = validationService.validate(nextSnapshot, payloadJson, policy);
         if (vr.hasErrors()) {
-            String requestId = (String) MDC.get("requestId");
+            String mdcRequestId = (String) MDC.get("mdcRequestId");
             ApiError err = new ApiError(
                     OffsetDateTime.now(),
                     Response.Status.BAD_REQUEST.getStatusCode(),
                     "VALIDATION_FAILED",
                     "Snapshot validation failed",
                     null,
-                    requestId
+                    mdcRequestId
             ).withValidationErrors(
                     vr.errors().stream().map(ValidationErrorDto::fromIssue).collect(Collectors.toList())
             );
@@ -314,9 +314,9 @@ public class DatasetOpsService {
                     .put("previousRevision", currentRevision)
                     .put("newRevision", newRevision)
                     .put("opCount", ops.size());
-            Object requestId = MDC.get("requestId");
-            if (requestId != null) {
-                details.put("requestId", String.valueOf(requestId));
+            Object mdcRequestId = MDC.get("requestId");
+            if (mdcRequestId != null) {
+                details.put("requestId", String.valueOf(mdcRequestId));
             }
             if (!ops.isEmpty()) {
                 details.put("firstOpId", ops.get(0).opId);
@@ -442,9 +442,9 @@ public class DatasetOpsService {
                     .put("toRevision", toRevision)
                     .put("limit", safeLimit)
                     .put("count", ops.size());
-            Object requestId = MDC.get("requestId");
-            if (requestId != null) {
-                details.put("requestId", String.valueOf(requestId));
+            Object mdcRequestId = MDC.get("requestId");
+            if (mdcRequestId != null) {
+                details.put("requestId", String.valueOf(mdcRequestId));
             }
             auditService.record(datasetId, principal.subject(), "OPS_READ_SINCE", details);
         } catch (Exception ignored) {
@@ -460,9 +460,42 @@ public class DatasetOpsService {
      * <p>If {@code fromRevision} is provided, the stream starts by emitting all operations
      * strictly greater than that revision (up to {@code limit}), and then continues with
      * live events for the dataset.
+     *
+     * <p><strong>Important:</strong> This method must not be {@code @Transactional}. The SSE connection can stay open
+     * for a long time and may be closed by the client/proxy at any time. If a transaction spans the reactive stream,
+     * Narayana's Transaction Reaper can cancel it, causing noisy {@code RollbackException}/{@code "transaction is not active"}
+     * errors. We therefore do all database work up-front in a short transaction and then return a purely in-memory stream.
+     */
+    public Multi<OperationEvent> streamOps(UUID datasetId, Long fromRevision, Integer limit) {
+        StreamInit init = prepareStreamInit(datasetId, fromRevision, limit);
+
+        // Live events (filter to ensure monotonicity if the client passes fromRevision)
+        Multi<OperationEvent> live = sseHub.stream(datasetId)
+                .select().where(ev -> ev != null && ev.revision() > init.startFrom);
+
+        if (init.backlog.isEmpty()) {
+            return live;
+        }
+
+        return Multi.createBy().concatenating().streams(Multi.createFrom().iterable(init.backlog), live);
+    }
+
+    private static final class StreamInit {
+        final long startFrom;
+        final List<OperationEvent> backlog;
+
+        private StreamInit(long startFrom, List<OperationEvent> backlog) {
+            this.startFrom = startFrom;
+            this.backlog = backlog;
+        }
+    }
+
+    /**
+     * Performs ACL checks and loads an optional backlog inside a short JTA transaction.
+     * The returned data is safe to use outside a transaction.
      */
     @Transactional
-    public Multi<OperationEvent> streamOps(UUID datasetId, Long fromRevision, Integer limit) {
+    StreamInit prepareStreamInit(UUID datasetId, Long fromRevision, Integer limit) {
         long startFrom;
         int safeLimit = limit == null ? 200 : Math.max(1, Math.min(limit, 1000));
 
@@ -500,16 +533,15 @@ public class DatasetOpsService {
             }
             details.put("effectiveStartFrom", startFrom)
                     .put("limit", safeLimit);
-            Object requestId = MDC.get("requestId");
-            if (requestId != null) {
-                details.put("requestId", String.valueOf(requestId));
+            Object mdcRequestId = MDC.get("requestId");
+            if (mdcRequestId != null) {
+                details.put("requestId", String.valueOf(mdcRequestId));
             }
             auditService.record(datasetId, principal.subject(), "OPS_STREAM_SUBSCRIBE", details);
         } catch (Exception ignored) {
             // Best-effort only
         }
 
-        // Backlog (optional) + live stream
         var rows = operationRepository.listAfterRevision(datasetId, startFrom, safeLimit);
         List<OperationEvent> backlog = rows.stream()
                 .map(r -> {
@@ -531,15 +563,7 @@ public class DatasetOpsService {
                 })
                 .collect(Collectors.toList());
 
-        // Live events (filter to ensure monotonicity if the client passes fromRevision)
-        Multi<OperationEvent> live = sseHub.stream(datasetId)
-                .select().where(ev -> ev != null && ev.revision() > startFrom);
-
-        if (backlog.isEmpty()) {
-            return live;
-        }
-
-        return Multi.createBy().concatenating().streams(Multi.createFrom().iterable(backlog), live);
+        return new StreamInit(startFrom, backlog);
     }
 
     private static Integer extractSchemaVersion(JsonNode snapshot) {
