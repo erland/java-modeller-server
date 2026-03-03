@@ -12,11 +12,8 @@ import info.isaksson.erland.modeller.server.api.dto.DuplicateOpIdResponse;
 import info.isaksson.erland.modeller.server.api.dto.RevisionConflictResponse;
 import info.isaksson.erland.modeller.server.api.dto.ValidationErrorDto;
 import info.isaksson.erland.modeller.server.domain.Role;
-import info.isaksson.erland.modeller.server.domain.ValidationPolicy;
 import info.isaksson.erland.modeller.server.api.error.ApiError;
 import info.isaksson.erland.modeller.server.persistence.entities.DatasetEntity;
-import info.isaksson.erland.modeller.server.persistence.entities.DatasetOperationEntity;
-import info.isaksson.erland.modeller.server.persistence.entities.DatasetSnapshotHistoryEntity;
 import info.isaksson.erland.modeller.server.persistence.entities.DatasetSnapshotLatestEntity;
 import info.isaksson.erland.modeller.server.persistence.entities.DatasetLeaseEntity;
 import info.isaksson.erland.modeller.server.persistence.repositories.DatasetAclRepository;
@@ -29,15 +26,17 @@ import info.isaksson.erland.modeller.server.security.DatasetAuthorizationService
 import info.isaksson.erland.modeller.server.security.PrincipalInfo;
 import info.isaksson.erland.modeller.server.security.AuditService;
 import info.isaksson.erland.modeller.server.api.dto.LeaseConflictResponse;
-import info.isaksson.erland.modeller.server.validation.SnapshotValidationService;
 import info.isaksson.erland.modeller.server.validation.ValidationResult;
 import io.smallrye.mutiny.Multi;
+import info.isaksson.erland.modeller.server.ops.policy.LeasePolicyEnforcer;
+import info.isaksson.erland.modeller.server.ops.policy.RevisionGate;
+import info.isaksson.erland.modeller.server.ops.materialize.SnapshotMaterializer;
+import info.isaksson.erland.modeller.server.ops.persist.OpsPersister;
+import info.isaksson.erland.modeller.server.ops.DatasetOpsSseHub;
+import info.isaksson.erland.modeller.server.ops.events.OpsEventPublisher;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.persistence.EntityManager;
-import jakarta.persistence.LockModeType;
 import jakarta.transaction.Transactional;
-import jakarta.transaction.TransactionSynchronizationRegistry;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Response;
@@ -60,12 +59,14 @@ public class DatasetOpsService {
     private final DatasetSnapshotHistoryRepository historyRepository;
     private final DatasetOperationRepository operationRepository;
     private final DatasetLeaseRepository leaseRepository;
+    private final LeasePolicyEnforcer leasePolicyEnforcer;
+    private final RevisionGate revisionGate;
+    private final SnapshotMaterializer snapshotMaterializer;
+    private final OpsPersister opsPersister;
+
     private final DatasetAuthorizationService authz;
-    private final OperationsApplier applier;
-    private final SnapshotValidationService validationService;
     private final ObjectMapper mapper;
-    private final EntityManager em;
-    private final TransactionSynchronizationRegistry txSync;
+    private final OpsEventPublisher opsEventPublisher;
     private final DatasetOpsSseHub sseHub;
     private final AuditService auditService;
 
@@ -82,26 +83,28 @@ public class DatasetOpsService {
                              DatasetSnapshotHistoryRepository historyRepository,
                              DatasetOperationRepository operationRepository,
                              DatasetLeaseRepository leaseRepository,
+                             LeasePolicyEnforcer leasePolicyEnforcer,
+                             RevisionGate revisionGate,
                              DatasetAuthorizationService authz,
-                             OperationsApplier applier,
-                             SnapshotValidationService validationService,
+                             SnapshotMaterializer snapshotMaterializer,
+                             OpsPersister opsPersister,
                              ObjectMapper mapper,
-                             EntityManager em,
-                             TransactionSynchronizationRegistry txSync,
-                             DatasetOpsSseHub sseHub,
-                             AuditService auditService) {
+                     OpsEventPublisher opsEventPublisher,
+                             AuditService auditService,
+            DatasetOpsSseHub sseHub) {
         this.datasetRepository = datasetRepository;
         this.aclRepository = aclRepository;
         this.snapshotLatestRepository = snapshotLatestRepository;
         this.historyRepository = historyRepository;
         this.operationRepository = operationRepository;
         this.leaseRepository = leaseRepository;
+        this.leasePolicyEnforcer = leasePolicyEnforcer;
+        this.revisionGate = revisionGate;
         this.authz = authz;
-        this.applier = applier;
-        this.validationService = validationService;
+        this.snapshotMaterializer = snapshotMaterializer;
+        this.opsPersister = opsPersister;
         this.mapper = mapper;
-        this.em = em;
-        this.txSync = txSync;
+        this.opsEventPublisher = opsEventPublisher;
         this.sseHub = sseHub;
         this.auditService = auditService;
     }
@@ -160,50 +163,36 @@ public class DatasetOpsService {
         var activeLeaseOpt = leaseRepository.findActive(datasetId, nowLeaseCheck);
         boolean forcedLeaseOverride = false;
         String forcedLeaseHolder = null;
-        if (activeLeaseOpt.isPresent()) {
-            DatasetLeaseEntity activeLease = activeLeaseOpt.get();
-            if (!principal.subject().equals(activeLease.holderSub)) {
-                if (force) {
-                    if (!role.atLeast(Role.OWNER)) {
-                        throw new jakarta.ws.rs.ForbiddenException("Insufficient role for dataset");
-                    }
-                    forcedLeaseOverride = true;
-                    forcedLeaseHolder = activeLease.holderSub;
-                } else {
-                    return Response.status(Response.Status.CONFLICT)
-                            .entity(new LeaseConflictResponse(datasetId, activeLease.holderSub, activeLease.expiresAt))
-                            .build();
-                }
-            } else {
-                // Caller is lease holder: token required.
-                if (leaseToken == null || leaseToken.isBlank() || !leaseToken.trim().equals(activeLease.leaseToken)) {
-                    String mdcRequestId = (String) MDC.get("mdcRequestId");
-                    ApiError err = new ApiError(
-                            OffsetDateTime.now(),
-                            428,
-                            "LEASE_TOKEN_REQUIRED",
-                            "Missing or invalid X-Lease-Token for active lease",
-                            null,
-                            mdcRequestId
-                    );
-                    return Response.status(428).entity(err).build();
-                }
-            }
+
+        LeasePolicyEnforcer.Result leaseDecision = leasePolicyEnforcer.check(principal, role, activeLeaseOpt, leaseToken, force);
+        if (leaseDecision.outcome() == LeasePolicyEnforcer.Outcome.FORBIDDEN) {
+            throw new jakarta.ws.rs.ForbiddenException("Insufficient role for dataset");
+        }
+        if (leaseDecision.outcome() == LeasePolicyEnforcer.Outcome.CONFLICT) {
+            return toResponse(datasetId, new info.isaksson.erland.modeller.server.ops.append.AppendOpsResult.Conflict(
+                    leaseDecision.conflict()
+            ));
+        }
+        if (leaseDecision.forcedOverride()) {
+            forcedLeaseOverride = true;
+            forcedLeaseHolder = leaseDecision.forcedLeaseHolderSub();
         }
 
-        // Concurrency safety: lock dataset row for the duration of revision assignment
-        em.lock(ds, LockModeType.PESSIMISTIC_WRITE);
-
-        // Refresh the revision after acquiring the lock to be sure we compare against the latest committed value.
-        em.refresh(ds);
-
-        long currentRevision = ds.currentRevision;
-        long previousRevision = currentRevision;
-        if (request.baseRevision != currentRevision) {
-            return Response.status(Response.Status.CONFLICT)
-                    .entity(new RevisionConflictResponse(datasetId, request.baseRevision, currentRevision))
-                    .build();
+        // Concurrency safety + revision assignment: lock, refresh, compare baseRevision, compute newRevision
+        RevisionGate.Result gate = revisionGate.lockCompareAndAdvance(ds, request.baseRevision, request.operations.size());
+        if (gate instanceof RevisionGate.Conflict c) {
+            return toResponse(datasetId, new info.isaksson.erland.modeller.server.ops.append.AppendOpsResult.Conflict(
+                    new info.isaksson.erland.modeller.server.ops.append.OpsConflict.RevisionConflict(c.expectedBaseRevision(), c.currentRevision())
+            ));
         }
+        RevisionGate.Ok ok = (RevisionGate.Ok) gate;
+        long currentRevision = ok.previousRevision();
+        long previousRevision = ok.previousRevision();
+        long newRevision = ok.newRevision();
+
+        // We use the revision as a deterministic ETag for the "latest" snapshot.
+        String etag = String.valueOf(newRevision);
+
 
         DatasetSnapshotLatestEntity latest = snapshotLatestRepository.findById(datasetId);
         JsonNode baseSnapshot = null;
@@ -228,86 +217,50 @@ public class DatasetOpsService {
             String opId = op.opId.trim();
             var existing = operationRepository.findByOpId(datasetId, opId);
             if (existing.isPresent()) {
-                return Response.status(Response.Status.CONFLICT)
-                        .entity(new DuplicateOpIdResponse(datasetId, opId, existing.get().revision))
-                        .build();
+                return toResponse(datasetId, new info.isaksson.erland.modeller.server.ops.append.AppendOpsResult.Conflict(
+                        new info.isaksson.erland.modeller.server.ops.append.OpsConflict.DuplicateOpId(opId, existing.get().revision)
+                ));
             }
         }
 
-        JsonNode nextSnapshot = applier.applyAll(baseSnapshot, ops);
+        SnapshotMaterializer.Result materialized =
+                snapshotMaterializer.materialize(baseSnapshot, ops, ds.validationPolicy);
 
-        // Validate final materialized snapshot according to dataset policy (reuse Phase 2 behavior)
-        ValidationPolicy policy = ds.validationPolicy == null ? ValidationPolicy.NONE : ds.validationPolicy;
-        String payloadJson = nextSnapshot.toString();
-        ValidationResult vr = validationService.validate(nextSnapshot, payloadJson, policy);
-        if (vr.hasErrors()) {
-            String mdcRequestId = (String) MDC.get("mdcRequestId");
-            ApiError err = new ApiError(
-                    OffsetDateTime.now(),
-                    Response.Status.BAD_REQUEST.getStatusCode(),
-                    "VALIDATION_FAILED",
-                    "Snapshot validation failed",
-                    null,
-                    mdcRequestId
-            ).withValidationErrors(
-                    vr.errors().stream().map(ValidationErrorDto::fromIssue).collect(Collectors.toList())
-            );
-
-            return Response.status(Response.Status.BAD_REQUEST).entity(err).build();
+        if (materialized instanceof SnapshotMaterializer.ValidationFailed vf) {
+            return toResponse(datasetId, new info.isaksson.erland.modeller.server.ops.append.AppendOpsResult.Conflict(
+                    new info.isaksson.erland.modeller.server.ops.append.OpsConflict.ValidationFailed(
+                            vf.validationResult().errors().stream()
+                                    .map(ValidationErrorDto::fromIssue)
+                                    .collect(Collectors.toList())
+                    )
+            ));
         }
 
-        long newRevision = currentRevision + ops.size();
+        SnapshotMaterializer.Ok okMat = (SnapshotMaterializer.Ok) materialized;
+        JsonNode nextSnapshot = okMat.snapshot();
+        String payloadJson = okMat.payloadJson();
         OffsetDateTime now = OffsetDateTime.now();
 
-        // Persist operation log
-        for (int i = 0; i < ops.size(); i++) {
-            OperationRequest op = ops.get(i);
-            DatasetOperationEntity e = new DatasetOperationEntity();
-            e.datasetId = datasetId;
-            e.revision = currentRevision + 1L + i;
-            e.opId = op.opId.trim();
-            e.opType = op.type.trim();
-            e.payloadJson = op.payload == null ? "null" : op.payload.toString();
-            e.createdAt = now;
-            e.createdBy = principal.subject();
-            operationRepository.persist(e);
-        }
+        // Persist (dataset metadata + ops + snapshots)
+        opsPersister.persistAppend(new OpsPersister.AppendRequest(
+                datasetId,
+                ds,
+                ops,
+                previousRevision,
+                newRevision,
+                now,
+                principal,
+                latest,
+                payloadJson,
+                etag,
+                nextSnapshot,
+                forcedLeaseOverride,
+                forcedLeaseHolder,
+                snapshotHistoryKeep,
+                snapshotHistoryMaxAgeDays
+        ));
 
-        // Persist snapshot_latest
-        DatasetSnapshotLatestEntity newLatest = latest != null ? latest : new DatasetSnapshotLatestEntity();
-        newLatest.datasetId = datasetId;
-        newLatest.revision = newRevision;
-        newLatest.etag = String.valueOf(newRevision);
-        newLatest.payloadJson = payloadJson;
-        newLatest.updatedAt = now;
-        if (latest == null) {
-            snapshotLatestRepository.persist(newLatest);
-        }
-
-        // Persist snapshot_history entry for the new revision
-        DatasetSnapshotHistoryEntity h = new DatasetSnapshotHistoryEntity();
-        h.datasetId = datasetId;
-        h.revision = newRevision;
-        h.etag = String.valueOf(newRevision);
-        h.payloadJson = payloadJson;
-        h.schemaVersion = extractSchemaVersion(nextSnapshot);
-        h.savedAt = now;
-        h.savedBy = principal.subject();
-        h.payloadBytes = h.payloadJson.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
-        h.savedAction = "OPS_APPEND";
-        h.savedMessage = null;
-        historyRepository.persist(h);
-
-        // Prune history (same knobs as snapshot PUT)
-        historyRepository.pruneKeepLatest(datasetId, snapshotHistoryKeep);
-        historyRepository.pruneByMaxAgeDays(datasetId, snapshotHistoryMaxAgeDays);
-
-        // Update dataset revision and metadata
-        ds.currentRevision = newRevision;
-        ds.updatedAt = now;
-        ds.updatedBy = principal.subject();
-
-        // Audit: record append (write-side) as a single entry with summary details.
+// Audit: record append (write-side) as a single entry with summary details.
         // Best-effort: a failure to write audit must not fail the append.
         try {
             ObjectNode details = auditService.details()
@@ -349,45 +302,80 @@ public class DatasetOpsService {
                 })
                 .collect(Collectors.toList());
 
-        AppendOperationsResponse resp = new AppendOperationsResponse(newRevision, accepted);
-
-        // Publish SSE events only after successful commit.
-        // (If the transaction rolls back, subscribers should not observe any of these operations.)
-        // Ordering guarantee: publish in revision order per dataset (the hub enforces ordering).
-        registerAfterCommit(() -> {
-            sseHub.ensureBaseline(datasetId, previousRevision);
-            accepted.forEach(ev -> sseHub.publish(datasetId, ev));
-        });
-
-        return Response.ok(resp).build();
+        return toResponse(datasetId, new info.isaksson.erland.modeller.server.ops.append.AppendOpsResult.Success(
+                previousRevision,
+                newRevision,
+                now,
+                principal.subject(),
+                accepted,
+                forcedLeaseOverride,
+                forcedLeaseHolder
+        ));
     }
 
-    private void registerAfterCommit(Runnable r) {
-        txSync.registerInterposedSynchronization(new jakarta.transaction.Synchronization() {
-            @Override
-            public void beforeCompletion() {
-                // no-op
-            }
+    private Response toResponse(UUID datasetId, info.isaksson.erland.modeller.server.ops.append.AppendOpsResult result) {
+        if (result instanceof info.isaksson.erland.modeller.server.ops.append.AppendOpsResult.Success s) {
+            AppendOperationsResponse resp = new AppendOperationsResponse(s.newRevision(), s.accepted());
 
-            @Override
-            public void afterCompletion(int status) {
-                if (status == jakarta.transaction.Status.STATUS_COMMITTED) {
-                    try {
-                        r.run();
-                    } catch (Exception ignored) {
-                        // Do not fail requests if SSE publication fails.
-                    }
-                }
-            }
-        });
+            // Publish SSE events only after successful commit.
+            // (If the transaction rolls back, subscribers should not observe any of these operations.)
+            // Ordering guarantee: publish in revision order per dataset (the hub enforces ordering).
+            opsEventPublisher.publishAcceptedEventsAfterCommit(datasetId, s.previousRevision(), s.accepted());
+return Response.ok(resp).build();
+        }
+
+        info.isaksson.erland.modeller.server.ops.append.OpsConflict conflict =
+                ((info.isaksson.erland.modeller.server.ops.append.AppendOpsResult.Conflict) result).conflict();
+
+        if (conflict instanceof info.isaksson.erland.modeller.server.ops.append.OpsConflict.LeaseConflict lc) {
+            return Response.status(Response.Status.CONFLICT)
+                    .entity(new LeaseConflictResponse(datasetId, lc.holderSub(), lc.expiresAt()))
+                    .build();
+        }
+
+        if (conflict instanceof info.isaksson.erland.modeller.server.ops.append.OpsConflict.LeaseTokenRequired) {
+            String mdcRequestId = (String) MDC.get("mdcRequestId");
+            ApiError err = new ApiError(
+                    OffsetDateTime.now(),
+                    428,
+                    "LEASE_TOKEN_REQUIRED",
+                    "Missing or invalid X-Lease-Token for active lease",
+                    null,
+                    mdcRequestId
+            );
+            return Response.status(428).entity(err).build();
+        }
+
+        if (conflict instanceof info.isaksson.erland.modeller.server.ops.append.OpsConflict.RevisionConflict rc) {
+            return Response.status(Response.Status.CONFLICT)
+                    .entity(new RevisionConflictResponse(datasetId, rc.requestedBaseRevision(), rc.currentRevision()))
+                    .build();
+        }
+
+        if (conflict instanceof info.isaksson.erland.modeller.server.ops.append.OpsConflict.DuplicateOpId dup) {
+            return Response.status(Response.Status.CONFLICT)
+                    .entity(new DuplicateOpIdResponse(datasetId, dup.opId(), dup.existingRevision()))
+                    .build();
+        }
+
+        if (conflict instanceof info.isaksson.erland.modeller.server.ops.append.OpsConflict.ValidationFailed vf) {
+            String mdcRequestId = (String) MDC.get("mdcRequestId");
+            ApiError err = new ApiError(
+                    OffsetDateTime.now(),
+                    Response.Status.BAD_REQUEST.getStatusCode(),
+                    "VALIDATION_FAILED",
+                    "Snapshot validation failed",
+                    null,
+                    mdcRequestId
+            ).withValidationErrors(vf.errors());
+
+            return Response.status(Response.Status.BAD_REQUEST).entity(err).build();
+        }
+
+        // Should be unreachable as OpsConflict is sealed.
+        throw new jakarta.ws.rs.InternalServerErrorException("Unsupported append conflict type: " + conflict.getClass().getName());
     }
 
-    /**
-     * Returns operations with revision strictly greater than {@code fromRevision}.
-     *
-     * Endpoint: GET /datasets/{datasetId}/ops?fromRevision=<n>&limit=<m>
-     */
-    @Transactional
     public Response opsSince(UUID datasetId, Long fromRevision, Integer limit) {
         if (fromRevision == null) {
             throw new BadRequestException("fromRevision is required");
